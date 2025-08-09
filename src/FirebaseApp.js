@@ -103,6 +103,8 @@ const SyncPanel = ({ show, onClose }) => {
   const { syncLocalDataToFirebase, syncStatus } = useFirebaseData();
   const { 
     incomeEntries, 
+    bankEntries,
+    cashEntries,
     officeEntries, 
     salaryEntries, 
     kitchenEntries 
@@ -117,6 +119,8 @@ const SyncPanel = ({ show, onClose }) => {
     
     const localData = {
       incomeEntries,
+      bankEntries,
+      cashEntries,
       officeEntries,
       salaryEntries,
       kitchenEntries
