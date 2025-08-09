@@ -91,15 +91,14 @@ export const DataProvider = ({ children }) => {
       }
     };
 
-    // Temporarily use localStorage only due to Firebase permission issues
-    // TODO: Re-enable Firebase once permission issues are resolved
-    loadLocalData();
-    
-    // if (user) {
-    //   loadFirebaseData();
-    // } else {
-    //   loadLocalData();
-    // }
+    // Firebase is working! Load from Firebase when user is authenticated
+    if (user) {
+      console.log('🔥 Loading data from Firebase for user:', user.uid);
+      loadFirebaseData();
+    } else {
+      console.log('📦 Loading data from localStorage (no user authenticated)');
+      loadLocalData();
+    }
   }, [user]);
 
   // Save data to localStorage whenever state changes
@@ -304,42 +303,46 @@ export const DataProvider = ({ children }) => {
     setKitchenEntries(prev => [...prev, { ...entry, id: Date.now() }]);
   };
 
-  const addBankEntry = (entry) => {
+  const addBankEntry = async (entry) => {
     const newEntry = { ...entry, id: Date.now() };
     
-    // Add to local state and localStorage for persistence
+    // Add to local state immediately
     setBankEntries(prev => [...prev, newEntry]);
-    console.log('Bank entry saved to localStorage successfully');
     
-    // Temporarily disabled Firebase save due to permission issues
-    // TODO: Re-enable once Firebase permissions are fixed
-    // if (user) {
-    //   try {
-    //     await cashBookService.addBankEntry(user.uid, newEntry);
-    //     console.log('Bank entry saved to Firebase successfully');
-    //   } catch (error) {
-    //     console.error('Error saving bank entry to Firebase:', error);
-    //   }
-    // }
+    // Save to Firebase (now that we know it works!)
+    if (user) {
+      try {
+        await cashBookService.addBankEntry(user.uid, newEntry);
+        console.log('✅ Bank entry saved to Firebase successfully');
+      } catch (error) {
+        console.error('❌ Error saving bank entry to Firebase:', error);
+        // Keep localStorage as fallback
+        console.log('📦 Bank entry saved to localStorage as fallback');
+      }
+    } else {
+      console.log('📦 Bank entry saved to localStorage (no user authenticated)');
+    }
   };
 
-  const addCashEntry = (entry) => {
+  const addCashEntry = async (entry) => {
     const newEntry = { ...entry, id: Date.now() };
     
-    // Add to local state and localStorage for persistence
+    // Add to local state immediately
     setCashEntries(prev => [...prev, newEntry]);
-    console.log('Cash entry saved to localStorage successfully');
     
-    // Temporarily disabled Firebase save due to permission issues
-    // TODO: Re-enable once Firebase permissions are fixed
-    // if (user) {
-    //   try {
-    //     await cashBookService.addCashEntry(user.uid, newEntry);
-    //     console.log('Cash entry saved to Firebase successfully');
-    //   } catch (error) {
-    //     console.error('Error saving cash entry to Firebase:', error);
-    //   }
-    // }
+    // Save to Firebase (now that we know it works!)
+    if (user) {
+      try {
+        await cashBookService.addCashEntry(user.uid, newEntry);
+        console.log('✅ Cash entry saved to Firebase successfully');
+      } catch (error) {
+        console.error('❌ Error saving cash entry to Firebase:', error);
+        // Keep localStorage as fallback
+        console.log('📦 Cash entry saved to localStorage as fallback');
+      }
+    } else {
+      console.log('📦 Cash entry saved to localStorage (no user authenticated)');
+    }
   };
 
   const addCustomer = (customer) => {
