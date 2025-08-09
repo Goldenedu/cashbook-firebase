@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { authService } from '../../firebase-services.js';
+import { authService } from '../firebase-services.js';
 import './FirebaseAuth.css';
 
 const FirebaseAuth = ({ onAuthSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('goldeneduprivateschool@gmail.com');
+  const [password, setPassword] = useState('Admin');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [user, setUser] = useState(null);
@@ -36,8 +36,6 @@ const FirebaseAuth = ({ onAuthSuccess }) => {
       }
 
       if (result.success) {
-        setEmail('');
-        setPassword('');
         if (onAuthSuccess) {
           onAuthSuccess(result.user);
         }
@@ -46,6 +44,33 @@ const FirebaseAuth = ({ onAuthSuccess }) => {
       }
     } catch (err) {
       setError('An unexpected error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleQuickAdminLogin = async () => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      // First try to sign in
+      let result = await authService.signIn('goldeneduprivateschool@gmail.com', 'Admin');
+      
+      if (!result.success && result.error.includes('user-not-found')) {
+        // If user doesn't exist, create the admin account
+        result = await authService.signUp('goldeneduprivateschool@gmail.com', 'Admin');
+      }
+
+      if (result.success) {
+        if (onAuthSuccess) {
+          onAuthSuccess(result.user);
+        }
+      } else {
+        setError(result.error);
+      }
+    } catch (err) {
+      setError('Failed to setup admin account');
     } finally {
       setLoading(false);
     }
@@ -130,6 +155,22 @@ const FirebaseAuth = ({ onAuthSuccess }) => {
             {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Sign Up')}
           </button>
         </form>
+
+        <div className="quick-login-section">
+          <div className="divider">
+            <span>or</span>
+          </div>
+          <button 
+            onClick={handleQuickAdminLogin}
+            disabled={loading}
+            className="auth-button quick-admin-button"
+          >
+            {loading ? 'Setting up...' : 'Quick Admin Login'}
+          </button>
+          <p className="quick-login-info">
+            Use pre-configured admin account for immediate access
+          </p>
+        </div>
 
         <div className="auth-switch">
           <p>

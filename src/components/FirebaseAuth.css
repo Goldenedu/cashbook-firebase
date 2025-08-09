@@ -150,6 +150,53 @@
   color: #764ba2;
 }
 
+/* Quick Login Styles */
+.quick-login-section {
+  margin-top: 20px;
+  padding-top: 20px;
+}
+
+.divider {
+  text-align: center;
+  margin: 20px 0;
+  position: relative;
+}
+
+.divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: #e1e8ed;
+}
+
+.divider span {
+  background: white;
+  padding: 0 15px;
+  color: #7f8c8d;
+  font-size: 14px;
+  position: relative;
+}
+
+.quick-admin-button {
+  background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+  margin-top: 0;
+}
+
+.quick-admin-button:hover:not(:disabled) {
+  box-shadow: 0 8px 25px rgba(39, 174, 96, 0.3);
+}
+
+.quick-login-info {
+  text-align: center;
+  font-size: 12px;
+  color: #7f8c8d;
+  margin: 10px 0 0 0;
+  line-height: 1.4;
+}
+
 /* Mobile responsive */
 @media (max-width: 480px) {
   .auth-container {

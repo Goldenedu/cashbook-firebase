@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { cashBookService, authService } from '../firebase-services.js';
+import { cashBookService, authService } from './firebase-services.js';
 
 const FirebaseDataContext = createContext();
 
