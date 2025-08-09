@@ -306,14 +306,24 @@ export const DataProvider = ({ children }) => {
   const addBankEntry = async (entry) => {
     const newEntry = { ...entry, id: Date.now() };
     
+    console.log('🔄 Adding bank entry:', newEntry);
+    console.log('🔄 User ID:', user?.uid);
+    
     // Add to local state immediately
     setBankEntries(prev => [...prev, newEntry]);
     
     // Save to Firebase (now that we know it works!)
     if (user) {
       try {
-        await cashBookService.addBankEntry(user.uid, newEntry);
-        console.log('✅ Bank entry saved to Firebase successfully');
+        console.log('🔄 Calling Firebase addBankEntry...');
+        const result = await cashBookService.addBankEntry(user.uid, newEntry);
+        console.log('🔄 Firebase result:', result);
+        
+        if (result.success) {
+          console.log('✅ Bank entry saved to Firebase successfully with ID:', result.id);
+        } else {
+          console.error('❌ Firebase returned error:', result.error);
+        }
       } catch (error) {
         console.error('❌ Error saving bank entry to Firebase:', error);
         // Keep localStorage as fallback
@@ -327,14 +337,24 @@ export const DataProvider = ({ children }) => {
   const addCashEntry = async (entry) => {
     const newEntry = { ...entry, id: Date.now() };
     
+    console.log('🔄 Adding cash entry:', newEntry);
+    console.log('🔄 User ID:', user?.uid);
+    
     // Add to local state immediately
     setCashEntries(prev => [...prev, newEntry]);
     
     // Save to Firebase (now that we know it works!)
     if (user) {
       try {
-        await cashBookService.addCashEntry(user.uid, newEntry);
-        console.log('✅ Cash entry saved to Firebase successfully');
+        console.log('🔄 Calling Firebase addCashEntry...');
+        const result = await cashBookService.addCashEntry(user.uid, newEntry);
+        console.log('🔄 Firebase result:', result);
+        
+        if (result.success) {
+          console.log('✅ Cash entry saved to Firebase successfully with ID:', result.id);
+        } else {
+          console.error('❌ Firebase returned error:', result.error);
+        }
       } catch (error) {
         console.error('❌ Error saving cash entry to Firebase:', error);
         // Keep localStorage as fallback
