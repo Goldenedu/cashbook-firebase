@@ -30,7 +30,21 @@ const FirebaseAuth = ({ onAuthSuccess }) => {
     try {
       let result;
       if (isLogin) {
+        // First try to sign in
         result = await authService.signIn(email, password);
+        
+        // If user doesn't exist and it's the admin account, create it automatically
+        if (!result.success && 
+            (result.error.includes('user-not-found') || result.error.includes('invalid-credential')) &&
+            email === 'goldeneduprivateschool@gmail.com') {
+          console.log('Admin account not found, creating it...');
+          setError('Creating admin account...');
+          result = await authService.signUp(email, password);
+          if (result.success) {
+            setError('');
+            console.log('Admin account created successfully!');
+          }
+        }
       } else {
         result = await authService.signUp(email, password);
       }
