@@ -12,11 +12,11 @@ const BOOK_FORMATS = {
     ]
   },
   cash: {
-    columns: ["Date", "FY", "A/C Head", "A/C Name", "Description", "Method", "Debit", "Credit", "Entry Date"],
+    columns: ["Date", "FY", "A/C Head", "A/C Name", "Description", "Method", "Debit", "Credit", "Transfer", "Entry Date"],
     requiredFields: ["Date", "Description"],
     sampleData: [
-      ["2024-01-15", "FY 2024-25", "Cash in Hand", "Petty Cash", "Office supplies", "Cash", "500", "", "2024-01-15"],
-      ["2024-01-16", "FY 2024-25", "Cash in Hand", "Main Cash", "Sales receipt", "Cash", "", "2000", "2024-01-16"]
+      ["2024-01-15", "FY 2024-25", "Cash in Hand", "Petty Cash", "Office supplies", "Cash", "500", "", "", "2024-01-15"],
+      ["2024-01-16", "FY 2024-25", "Cash in Hand", "Main Cash", "Sales receipt", "Cash", "", "2000", "", "2024-01-16"]
     ]
   },
   income: {

@@ -237,7 +237,7 @@ function BankApp() {
     }
   };
 
-  // 📌 Excel Export with headers
+  // 📌 Excel Export with headers (UI table + Entry Date)
   const exportToExcel = () => {
     const headers = [
       "Date",
