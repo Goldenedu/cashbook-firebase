@@ -3,7 +3,7 @@ import FirebaseAuth from './components/FirebaseAuth';
 import CSVDebugHelper from './components/CSVDebugHelper';
 import SimpleCSVTest from './components/SimpleCSVTest';
 import CSVImportTest from './components/CSVImportTest';
-import FirebaseTest from './components/FirebaseTest';
+
 import { FirebaseDataProvider, useFirebaseData } from './FirebaseDataContext';
 import { useData } from './DataContext'; // Your existing data context
 import './App.css';
@@ -31,7 +31,6 @@ const FirebaseIntegratedApp = () => {
         {showDebugHelper && <CSVDebugHelper />}
         {showCSVTester && <CSVImportTest onClose={() => setShowCSVTester(false)} />}
         <SyncPanel show={showSyncPanel} onClose={() => setShowSyncPanel(false)} />
-        <FirebaseTest />
         <div className="app-header">
           <div className="header-left">
             <h1>CashBook with Firebase</h1>
