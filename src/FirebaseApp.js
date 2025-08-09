@@ -81,6 +81,43 @@ const SyncStatusIndicator = () => {
   );
 };
 
+// Compact sync status component for displaying beside book titles
+const BookSyncStatus = ({ bookType, entryCount }) => {
+  const { syncStatus } = useFirebaseData();
+  
+  const getStatusColor = () => {
+    switch (syncStatus) {
+      case 'synced': return '#27ae60';
+      case 'syncing': return '#f39c12';
+      case 'error': return '#e74c3c';
+      default: return '#95a5a6';
+    }
+  };
+
+  const getStatusIcon = () => {
+    switch (syncStatus) {
+      case 'synced': return '✅';
+      case 'syncing': return '🔄';
+      case 'error': return '❌';
+      default: return '⏸️';
+    }
+  };
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      fontSize: '12px',
+      color: '#666'
+    }}>
+      <span style={{ color: getStatusColor() }}>
+        {getStatusIcon()} {entryCount} entries
+      </span>
+    </div>
+  );
+};
+
 const SyncPanel = ({ show, onClose }) => {
   const { syncLocalDataToFirebase, syncStatus } = useFirebaseData();
   const { 
@@ -186,3 +223,4 @@ const SyncPanel = ({ show, onClose }) => {
 };
 
 export default FirebaseIntegratedApp;
+export { BookSyncStatus };
