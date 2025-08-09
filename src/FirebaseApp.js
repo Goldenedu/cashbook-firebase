@@ -146,6 +146,14 @@ const SyncPanel = ({ show, onClose }) => {
                 <span className="data-count">{incomeEntries?.length || 0}</span>
               </div>
               <div className="data-item">
+                <span className="data-label">Bank Entries:</span>
+                <span className="data-count">{bankEntries?.length || 0}</span>
+              </div>
+              <div className="data-item">
+                <span className="data-label">Cash Entries:</span>
+                <span className="data-count">{cashEntries?.length || 0}</span>
+              </div>
+              <div className="data-item">
                 <span className="data-label">Office Expenses:</span>
                 <span className="data-count">{officeEntries?.length || 0}</span>
               </div>
