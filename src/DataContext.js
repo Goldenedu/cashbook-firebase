@@ -76,26 +76,118 @@ export const DataProvider = ({ children }) => {
     localStorage.setItem('customers', JSON.stringify(customers));
   }, [customers]);
 
-  // CSV Import functionality
+  // Enhanced CSV Import functionality with better parsing
   const importCSVData = async (file, bookType) => {
     return new Promise((resolve, reject) => {
+      // Validate file type
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        reject(new Error('Please select a CSV file (.csv extension required)'));
+        return;
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        reject(new Error('File size too large. Please select a file smaller than 10MB'));
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
           const csv = e.target.result;
-          const lines = csv.split('\n');
-          const headers = lines[0].split(',').map(h => h.trim());
-          const data = [];
+          
+          // Handle different line endings
+          const lines = csv.split(/\r?\n/);
+          
+          if (lines.length < 2) {
+            reject(new Error('CSV file must have at least a header row and one data row'));
+            return;
+          }
 
+          // Enhanced CSV parsing function to handle quoted fields
+          const parseCSVLine = (line) => {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+              const char = line[i];
+              
+              if (char === '"') {
+                if (inQuotes && line[i + 1] === '"') {
+                  // Handle escaped quotes
+                  current += '"';
+                  i++; // Skip next quote
+                } else {
+                  // Toggle quote state
+                  inQuotes = !inQuotes;
+                }
+              } else if (char === ',' && !inQuotes) {
+                // End of field
+                result.push(current.trim());
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            
+            // Add the last field
+            result.push(current.trim());
+            return result;
+          };
+
+          // Parse header row
+          const headers = parseCSVLine(lines[0]).map(h => h.replace(/"/g, '').trim());
+          
+          if (headers.length === 0 || headers.every(h => !h)) {
+            reject(new Error('CSV file must have valid column headers'));
+            return;
+          }
+
+          const data = [];
+          let successfulRows = 0;
+          let skippedRows = 0;
+
+          // Parse data rows
           for (let i = 1; i < lines.length; i++) {
-            if (lines[i].trim()) {
-              const values = lines[i].split(',').map(v => v.trim());
+            const line = lines[i].trim();
+            if (!line) {
+              skippedRows++;
+              continue; // Skip empty lines
+            }
+
+            try {
+              const values = parseCSVLine(line);
+              
+              // Skip rows that are completely empty
+              if (values.every(v => !v.trim())) {
+                skippedRows++;
+                continue;
+              }
+
               const entry = {};
               headers.forEach((header, index) => {
-                entry[header] = values[index] || '';
+                let value = values[index] || '';
+                // Remove surrounding quotes if present
+                value = value.replace(/^"(.*)"$/, '$1').trim();
+                entry[header] = value;
               });
+
+              // Add timestamp and ID for tracking
+              entry.id = Date.now() + Math.random();
+              entry.importedAt = new Date().toISOString();
+              
               data.push(entry);
+              successfulRows++;
+            } catch (rowError) {
+              console.warn(`Error parsing row ${i + 1}:`, rowError);
+              skippedRows++;
             }
+          }
+
+          if (data.length === 0) {
+            reject(new Error('No valid data rows found in CSV file'));
+            return;
           }
 
           // Add imported data to appropriate state
@@ -122,17 +214,21 @@ export const DataProvider = ({ children }) => {
               setCustomers(prev => [...prev, ...data]);
               break;
             default:
-              reject(new Error('Invalid book type'));
+              reject(new Error('Invalid book type. Please select a valid book type.'));
               return;
           }
 
-          resolve(`Successfully imported ${data.length} entries to ${bookType} book`);
+          const message = `Successfully imported ${successfulRows} entries to ${bookType} book` + 
+                         (skippedRows > 0 ? ` (${skippedRows} rows skipped)` : '');
+          resolve(message);
         } catch (error) {
-          reject(error);
+          console.error('CSV Import Error:', error);
+          reject(new Error(`Error reading CSV file: ${error.message}. Please check the format and try again.`));
         }
       };
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsText(file);
+      
+      reader.onerror = () => reject(new Error('Failed to read file. Please try again.'));
+      reader.readAsText(file, 'UTF-8');
     });
   };
 
