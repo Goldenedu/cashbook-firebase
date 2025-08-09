@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dashboard - Cashbook</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      height: 100vh;
+      background-color: #ecf0f1;
+    }
+
+    .sidebar {
+      width: 200px;
+      background-color: #2c3e50;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      padding: 20px 10px;
+      box-shadow: 2px 0 5px rgba(0, 0, 0, 0.15);
+    }
+
+    .sidebar a {
+      padding: 10px 15px;
+      margin: 6px 0;
+      border-radius: 6px;
+      text-decoration: none;
+      color: #ecf0f1;
+      font-weight: 500;
+      font-size: 15px;
+      transition: all 0.3s ease;
+    }
+
+    .sidebar a:hover {
+      background-color: #34495e;
+      transform: translateX(5px);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    }
+
+    .sidebar .logout {
+      margin-top: auto;
+      color: #e74c3c;
+    }
+
+    .main-content {
+      flex-grow: 1;
+      padding: 40px;
+      background-color: #ffffff;
+      border-radius: 10px;
+      margin: 20px;
+      box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.05);
+    }
+
+    .main-content h1 {
+      font-size: 28px;
+      color: #2c3e50;
+    }
+
+    .main-content p {
+      font-size: 16px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <a href="#">Bank Book</a>
+    <a href="#">Cash Book</a>
+    <a href="#">Income Book</a>
+    <a href="#">Office Exp Book</a>
+    <a href="#">Salary Exp Book</a>
+    <a href="#">Kitchen Exp Book</a>
+    <a href="#">Customer List</a>
+    <a href="#">Invoice</a>
+    <a href="#">Reporting</a>
+    <a href="{% url 'logout' %}" class="logout">Logout</a>
+  </div>
+
+  <div class="main-content">
+    <h1>Welcome, {{ request.user.username }}!</h1>
+    <p>This area will show the content of selected menu item.</p>
+  </div>
+</body>
+</html>

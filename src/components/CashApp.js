@@ -1,0 +1,793 @@
+import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
+import { useData } from '../DataContext';
+
+function CashApp() {
+  const { cashEntries, setCashEntries, addCashEntry, deleteCashEntry, updateFirestoreDoc } = useData();
+  const entries = cashEntries;
+  const setEntries = setCashEntries;
+
+  const [formData, setFormData] = useState({
+    date: '',
+    acHead: 'Cash',
+    acName: '',
+    description: '',
+    method: '',
+    debit: '',
+    credit: '',
+    transfer: '',
+    fy: ''
+  });
+
+  const [editIndex, setEditIndex] = useState(null);
+
+  const [filters, setFilters] = useState({
+    date: '',
+    fy: '',
+    acHead: '',
+    acName: '',
+    description: '',
+    method: '',
+    debit: '',
+    credit: '',
+    transfer: ''
+  });
+
+  const [exportRange, setExportRange] = useState({
+    startDate: '',
+    endDate: ''
+  });
+
+  const formatNumber = (num) => {
+    if (num === '' || num === null || num === undefined) return '';
+    return parseFloat(num).toLocaleString('en-US');
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d)) return dateStr;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
+
+  const calculateFY = (dateStr) => {
+    if (!dateStr) return '';
+    
+    let d;
+    // Handle DD-MM-YYYY format from CSV
+    if (dateStr.includes('-') && dateStr.split('-').length === 3) {
+      const parts = dateStr.split('-');
+      if (parts[0].length === 2) {
+        // DD-MM-YYYY format
+        d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+      } else {
+        // YYYY-MM-DD format
+        d = new Date(dateStr);
+      }
+    } else {
+      d = new Date(dateStr);
+    }
+    
+    if (isNaN(d)) {
+      console.log(`Invalid date: ${dateStr}`);
+      return '';
+    }
+    
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    let fyStart = month >= 4 ? year : year - 1;
+    let fyEnd = fyStart + 1;
+    const fy = `${fyStart.toString().slice(-2)}-${fyEnd.toString().slice(-2)}`;
+    console.log(`Date: ${dateStr} -> FY: ${fy}`);
+    return fy;
+  };
+
+  const clearForm = () => {
+    setFormData({
+      date: '',
+      acHead: 'Cash',
+      acName: '',
+      description: '',
+      method: '',
+      debit: '',
+      credit: '',
+      transfer: '',
+      fy: ''
+    });
+    setEditIndex(null);
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      date: '',
+      fy: '',
+      acHead: '',
+      acName: '',
+      description: '',
+      method: '',
+      debit: '',
+      credit: '',
+      transfer: ''
+    });
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    if (name === "date") {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value,
+        fy: calculateFY(value) ? `FY ${calculateFY(value)}` : ''
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
+  };
+
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    console.log('Filter changed:', name, '=', value);
+    setFilters(prev => {
+      const newFilters = {
+        ...prev,
+        [name]: value,
+      };
+      console.log('New filters state:', newFilters);
+      return newFilters;
+    });
+  };
+
+  // Get unique values for dropdown filters
+  const uniqueFY = [...new Set(entries.map(entry => entry.fy).filter(Boolean))];
+  const uniqueAcHead = [...new Set(entries.map(entry => entry.acHead).filter(Boolean))];
+  const uniqueAcName = [...new Set(entries.map(entry => entry.acName).filter(Boolean))];
+  const uniqueMethod = [...new Set(entries.map(entry => entry.method).filter(Boolean))];
+  const uniqueTransfer = [...new Set(entries.map(entry => entry.transfer).filter(Boolean))];
+
+  const filteredEntries = entries.filter((entry) => {
+    const entryDate = new Date(entry.date);
+    const startDate = exportRange.startDate ? new Date(exportRange.startDate) : null;
+    const endDate = exportRange.endDate ? new Date(exportRange.endDate) : null;
+
+    return (
+      (filters.date === '' || (entry.date && entry.date.includes(filters.date))) &&
+      (filters.fy === '' || (entry.fy?.toLowerCase() || '').includes(filters.fy.toLowerCase())) &&
+      (filters.acHead === '' || (entry.acHead || '').toLowerCase().includes(filters.acHead.toLowerCase())) &&
+      (filters.acName === '' || (entry.acName || '').toLowerCase().includes(filters.acName.toLowerCase())) &&
+      (filters.description === '' || (entry.description || '').toLowerCase().includes(filters.description.toLowerCase())) &&
+      (filters.method === '' || (entry.method || '').toLowerCase().includes(filters.method.toLowerCase())) &&
+      (filters.debit === '' || (entry.debit || '').toString().includes(filters.debit)) &&
+      (filters.credit === '' || (entry.credit || '').toString().includes(filters.credit)) &&
+      (filters.transfer === '' || (entry.transfer || '').toLowerCase().includes(filters.transfer.toLowerCase())) &&
+      (!startDate || entryDate >= startDate) &&
+      (!endDate || entryDate <= endDate)
+    );
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    // Basic validation
+    if (!formData.date || !formData.acName || !formData.description || !formData.method ||
+        formData.date.trim() === '' || formData.acName.trim() === '' || formData.description.trim() === '' || formData.method.trim() === '') {
+      alert('Please fill in required fields: Date, A/C Name, Description, and Method');
+      console.log('Validation failed for:', { date: formData.date, acName: formData.acName, description: formData.description, method: formData.method });
+      return;
+    }
+
+    // Ensure at least debit or credit has a value
+    if (!formData.debit && !formData.credit) {
+      alert('Please enter either Debit or Credit amount');
+      return;
+    }
+
+    try {
+      console.log('=== CASH ENTRY SUBMISSION START ===');
+      console.log('Form Data:', JSON.stringify(formData, null, 2));
+      console.log('Method field value:', formData.method);
+      
+      if (editIndex !== null) {
+        const existingEntry = entries[editIndex];
+        if (!existingEntry.id) {
+          alert('Cannot update: This entry was not properly saved to the database.');
+          return;
+        }
+        
+        const entryData = {
+          ...formData,
+          debit: formData.debit ? parseFloat(formData.debit) || 0 : 0,
+          credit: formData.credit ? parseFloat(formData.credit) || 0 : 0
+        };
+        
+        // Update in Firebase
+        await updateFirestoreDoc('cash', existingEntry.id, entryData);
+        
+        // Update local state
+        const updatedEntries = [...entries];
+        updatedEntries[editIndex] = { ...entryData, id: existingEntry.id };
+        setEntries(updatedEntries);
+      } else {
+        const entryData = {
+          ...formData,
+          debit: formData.debit ? parseFloat(formData.debit) || 0 : 0,
+          credit: formData.credit ? parseFloat(formData.credit) || 0 : 0,
+          timestamp: new Date().toISOString()
+        };
+        
+        console.log('Processed entry data:', JSON.stringify(entryData, null, 2));
+        console.log('Calling addCashEntry...');
+        const savedEntry = await addCashEntry(entryData);
+        console.log('Entry saved successfully:', savedEntry);
+        
+        // Force refresh entries from Firebase to confirm save
+        console.log('Refreshing entries from Firebase...');
+        // Note: entries will be updated via the addCashEntry function in DataContext
+      }
+      clearForm();
+      console.log('=== CASH ENTRY SUBMISSION SUCCESS ===');
+      alert('Cash entry saved successfully!');
+    } catch (error) {
+      console.error('=== CASH ENTRY SUBMISSION ERROR ===');
+      console.error('Error saving cash entry:', error);
+      console.error('Error details:', error.message);
+      console.error('Stack trace:', error.stack);
+      alert(`Error saving cash entry: ${error.message}. Please check console for details.`);
+    }
+  };
+
+  const handleEdit = (index) => {
+    setFormData(entries[index]);
+    setEditIndex(index);
+  };
+
+  const handleDelete = async (index) => {
+    try {
+      const entry = entries[index];
+      console.log('Cash entry to delete:', entry);
+      
+      if (!entry.id) {
+        alert('Cannot delete: This entry was not properly saved to the database.');
+        return;
+      }
+      
+      await deleteCashEntry(entry);
+      alert('Cash entry deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting cash entry:', error);
+      alert(`Error deleting cash entry: ${error.message}. Please try again.`);
+    }
+  };
+
+  // 📌 Excel Export with headers
+  const exportToExcel = () => {
+    const headers = [
+      "Date",
+      "FY",
+      "A/C Head",
+      "A/C Name",
+      "Description",
+      "Method",
+      "Debit",
+      "Credit",
+      "Transfer",
+      "Entry Date"
+    ];
+
+    const dataToExport = filteredEntries.map(entry => [
+      formatDate(entry.date),
+      entry.fy,
+      entry.acHead,
+      entry.acName,
+      entry.description,
+      entry.method,
+      entry.debit,
+      entry.credit,
+      entry.transfer,
+      formatDate(entry.timestamp || entry.entryDate || entry.date || new Date().toISOString().split('T')[0])
+    ]);
+
+    const worksheetData = [headers, ...dataToExport];
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Cash Book');
+    XLSX.writeFile(workbook, 'cash_book.xlsx');
+  };
+
+  const importFromCSV = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const csvText = event.target.result;
+          const lines = csvText.split('\n').filter(line => line.trim());
+          
+          if (lines.length < 2) {
+            alert('CSV file must have at least a header row and one data row.');
+            return;
+          }
+          
+          // Parse CSV properly handling quoted fields with commas
+          const parseCSVLine = (line) => {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+              const char = line[i];
+              if (char === '"') {
+                inQuotes = !inQuotes;
+              } else if (char === ',' && !inQuotes) {
+                result.push(current.trim());
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            result.push(current.trim());
+            return result;
+          };
+          
+          const headers = parseCSVLine(lines[0]).map(h => h.replace(/"/g, '').trim());
+          console.log('CSV Headers found:', headers);
+          
+          const csvData = [];
+          for (let i = 1; i < lines.length; i++) {
+            const values = parseCSVLine(lines[i]).map(v => v.replace(/"/g, '').trim());
+            console.log(`Row ${i + 1} raw data:`, values);
+            
+            // More flexible - allow rows with different column counts
+            if (values.length === 0 || (values.length === 1 && values[0] === '')) {
+              console.log(`Skipping empty row ${i + 1}`);
+              continue;
+            }
+            
+            const entry = {
+              date: '',
+              fy: '',
+              acHead: 'Cash',
+              acName: '',
+              description: '',
+              method: '',
+              debit: '',
+              credit: '',
+              transfer: ''
+            };
+            
+            // Map CSV columns - handle flexible column counts
+            const maxCols = Math.max(headers.length, values.length);
+            for (let j = 0; j < maxCols; j++) {
+              const header = (headers[j] || '').toLowerCase().trim();
+              const value = (values[j] || '').trim();
+              
+              console.log(`  Column ${j + 1}: "${headers[j] || 'undefined'}" = "${value}"`);
+              
+              // Map by column position first, then by header name
+              if (j === 0 || header.includes('date')) {
+                if (value) {
+                  entry.date = value;
+                  // Auto-calculate FY from date
+                  const calculatedFY = calculateFY(value);
+                  entry.fy = calculatedFY ? `FY ${calculatedFY}` : '';
+                  console.log(`Date: ${value} -> Calculated FY: ${entry.fy}`);
+                }
+              } else if (j === 1 || header.includes('fy') || header.includes('fiscal')) {
+                // Use CSV FY data if available, otherwise keep calculated FY
+                if (value && value.trim() !== '') {
+                  entry.fy = value;
+                  console.log(`Using CSV FY: ${entry.fy}`);
+                } else if (entry.date) {
+                  // Ensure FY is calculated if CSV FY is empty
+                  const calculatedFY = calculateFY(entry.date);
+                  entry.fy = calculatedFY ? `FY ${calculatedFY}` : entry.fy;
+                  console.log(`Fallback FY calculation: ${entry.fy}`);
+                }
+              } else if (j === 2 || header.includes('head') || header.includes('a/c head') || header.includes('account head')) {
+                entry.acHead = value || 'Cash';
+              } else if (j === 3 || header.includes('name') || header.includes('a/c name') || header.includes('account name')) {
+                entry.acName = value;
+              } else if (j === 4 || header.includes('description') || header.includes('desc')) {
+                entry.description = value;
+              } else if (j === 5 || header.includes('debit')) {
+                // Handle quoted numbers with commas like "88,249,475"
+                const cleanValue = value.replace(/"/g, '').replace(/,/g, '').trim();
+                if (cleanValue && cleanValue !== '' && !isNaN(parseFloat(cleanValue))) {
+                  entry.debit = parseFloat(cleanValue);
+                  console.log(`    Mapped debit: ${cleanValue} -> ${entry.debit}`);
+                } else {
+                  console.log(`    Empty/invalid debit value: "${value}"`);
+                }
+              } else if (j === 6 || header.includes('credit')) {
+                // Handle quoted numbers with commas like "18,730,000"
+                const cleanValue = value.replace(/"/g, '').replace(/,/g, '').trim();
+                if (cleanValue && cleanValue !== '' && !isNaN(parseFloat(cleanValue))) {
+                  entry.credit = parseFloat(cleanValue);
+                  console.log(`    Mapped credit: ${cleanValue} -> ${entry.credit}`);
+                } else {
+                  console.log(`    Empty/invalid credit value: "${value}"`);
+                }
+              } else if (j === 7 || header.includes('transfer')) {
+                entry.transfer = value;
+              } else if (j === 8 || header.includes('entry date')) {
+                // Skip entry date column - we auto-generate this
+                console.log(`    Skipping entry date: ${value}`);
+              }
+            }
+            
+            console.log(`Row ${i + 1}:`, entry);
+            csvData.push(entry);
+          }
+          
+          if (csvData.length > 0) {
+            setEntries(csvData);
+            alert(`Successfully imported ${csvData.length} entries from CSV (existing data overwritten)\n\nColumn mapping:\n${headers.map((h, i) => `Column ${i + 1}: ${h}`).join('\n')}`);
+          } else {
+            alert('No valid data rows found in CSV file.');
+          }
+        } catch (error) {
+          alert('Error reading CSV file. Please check the format.');
+          console.error('CSV Import Error:', error);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const totalDebit = filteredEntries.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
+  const totalCredit = filteredEntries.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
+  const netBalance = totalDebit - totalCredit;
+
+  return (
+    <div style={{ padding: 15, backgroundColor: '#f5f6fa', minHeight: '100vh' }}>
+      {/* Header & Totals */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, backgroundColor: 'white', padding: '15px 20px', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+        <h2 style={{ color: '#2c3e50', margin: 0, fontSize: 24 }}>Bank Book</h2>
+        <div style={{ display: 'flex', gap: 15, alignItems: 'center' }}>
+          <div style={{ backgroundColor: '#3498db', color: 'white', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
+            Total Debit: {formatNumber(totalDebit)}
+          </div>
+          <div style={{ backgroundColor: '#2ecc71', color: 'white', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
+            Total Credit: {formatNumber(totalCredit)}
+          </div>
+          <div style={{ backgroundColor: netBalance >= 0 ? '#2ecc71' : '#e74c3c', color: 'white', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
+            Net Balance: {formatNumber(netBalance)}
+          </div>
+          <div style={{ backgroundColor: '#9b59b6', color: 'white', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
+            Total Entries: {filteredEntries.length}
+          </div>
+        </div>
+      </div>
+
+      {/* Compact Entry Form */}
+      <form id="CashEntryForm" onSubmit={handleSubmit} style={{ backgroundColor: 'white', padding: 15, borderRadius: 8, marginBottom: 15, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+        {/* First row - Main form fields */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
+          <input
+            type="date"
+            name="date"
+            value={formData.date}
+            onChange={handleInputChange}
+            required
+            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+          />
+          <input
+            type="text"
+            name="fy"
+            value={formData.fy}
+            readOnly
+            placeholder="Fiscal Year"
+            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, backgroundColor: '#ecf0f1', fontSize: 12 }}
+          />
+          <input
+            type="text"
+            name="acHead"
+            value={formData.acHead}
+            onChange={handleInputChange}
+            placeholder="Account Head"
+            required
+            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+          />
+          <select
+            name="acName"
+            value={formData.acName}
+            onChange={handleInputChange}
+            required
+            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+          >
+            <option value="">Select A/C Name</option>
+            <option>Cash-In</option>
+            <option>Kpay-In</option>
+            <option>Cash-Out</option>
+            <option>Kpay-Out</option>
+          </select>
+
+
+          <input
+            type="number"
+            name="debit"
+            value={formData.debit}
+            onChange={handleInputChange}
+            placeholder="Debit"
+            step="0.01"
+            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+          />
+          <input
+            type="number"
+            name="credit"
+            value={formData.credit}
+            onChange={handleInputChange}
+            placeholder="Credit"
+            step="0.01"
+            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+          />
+        </div>
+        
+        {/* Second row - Transfer, Method, Description */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 10, marginBottom: 12 }}>          
+          <select
+            name="transfer"
+            value={formData.transfer}
+            onChange={handleInputChange}
+            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+          >
+            <option value="">Select Transfer</option>
+            <option>Office Exp</option>
+            <option>Salary Exp</option>
+            <option>Kitchen Exp</option>
+            <option>Salary Exp</option>
+            <option>Cash-Bank</option>
+            <option>Kpay-Bank</option>
+            
+          </select>
+          <select
+            name="method"
+            value={formData.method || ''}
+            onChange={handleInputChange}
+            style={{ 
+              padding: 6, 
+              border: '1px solid #bdc3c7', 
+              borderRadius: 4, 
+              fontSize: 12,
+              backgroundColor: '#ffffff',
+              color: '#333333',
+              minHeight: '30px'
+            }}
+            required
+          >
+            <option value="" style={{color: '#999999'}}>Select Method</option>
+            <option value="Cash" style={{color: '#333333'}}>Cash</option>
+            <option value="Kpay" style={{color: '#333333'}}>Kpay</option>
+            <option value="Others" style={{color: '#333333'}}>Others</option>
+          </select>
+          <input
+            type="text"
+            name="description"
+            value={formData.description}
+            onChange={handleInputChange}
+            placeholder="Description (extended for longer text)"
+            style={{ 
+              padding: 6, 
+              border: '1px solid #bdc3c7', 
+              borderRadius: 4, 
+              fontSize: 12
+            }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="submit" style={{ padding: '8px 16px', backgroundColor: '#2c3e50', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 'bold' }}>
+            {editIndex !== null ? 'Update' : 'Add'} Entry
+          </button>
+          <button type="button" onClick={clearForm} style={{ padding: '8px 16px', backgroundColor: '#7f8c8d', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+            Clear
+          </button>
+        </div>
+      </form>
+
+      {/* Export/Import Controls */}
+      <div style={{ marginBottom: 15, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', backgroundColor: 'white', padding: '12px 15px', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+        <label style={{ fontSize: 12, color: '#2c3e50' }}>
+          Start Date:{' '}
+          <input
+            type="date"
+            value={exportRange.startDate}
+            onChange={e => setExportRange(prev => ({ ...prev, startDate: e.target.value }))}
+            style={{ marginLeft: 5, padding: 4, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 11 }}
+          />
+        </label>
+        <label style={{ fontSize: 12, color: '#2c3e50' }}>
+          End Date:{' '}
+          <input
+            type="date"
+            value={exportRange.endDate}
+            onChange={e => setExportRange(prev => ({ ...prev, endDate: e.target.value }))}
+            style={{ marginLeft: 5, padding: 4, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 11 }}
+          />
+        </label>
+        <button
+          onClick={exportToExcel}
+          style={{ padding: '8px 12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}
+        >
+          Export Excel
+        </button>
+
+        <label
+          style={{ padding: '8px 12px', backgroundColor: '#e67e22', color: 'white', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}
+        >
+          Import CSV
+          <input type="file" accept=".csv" onChange={importFromCSV} style={{ display: 'none' }} />
+        </label>
+      </div>
+
+      {/* Data Table */}
+      <div style={{ overflowX: 'auto', maxHeight: '70vh' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginTop: '0', fontSize: '11px' }}>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#27ae60' }}>
+
+            <tr style={{ backgroundColor: '#27ae60', color: 'white' }}>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '80px' }}>Date</th>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '60px' }}>FY</th>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '80px' }}>A/C Head</th>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '90px' }}>A/C Name</th>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '300px' }}>Description</th>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '70px' }}>Method</th>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '85px' }}>Debit</th>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '85px' }}>Credit</th>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '85px' }}>Transfer</th>
+              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '80px', textAlign: 'center' }}>Actions</th>
+            </tr>
+            <tr style={{ backgroundColor: '#27ae60', color: 'white' }}>
+              <th style={{ width: '80px', backgroundColor: '#27ae60', padding: '4px' }}>
+                <input
+                  type="date"
+                  name="date"
+                  value={filters.date}
+                  onChange={handleFilterChange}
+                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                />
+              </th>
+              <th style={{ width: '60px', backgroundColor: '#27ae60', padding: '4px' }}>
+                <select
+                  name="fy"
+                  value={filters.fy}
+                  onChange={handleFilterChange}
+                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                >
+                  <option value="">All FY</option>
+                  {uniqueFY.map(fy => (
+                    <option key={fy} value={fy}>{fy}</option>
+                  ))}
+                </select>
+              </th>
+              <th style={{ width: '80px', backgroundColor: '#27ae60', padding: '4px' }}>
+                <select
+                  name="acHead"
+                  value={filters.acHead}
+                  onChange={handleFilterChange}
+                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                >
+                  <option value="">All Head</option>
+                  {uniqueAcHead.map(head => (
+                    <option key={head} value={head}>{head}</option>
+                  ))}
+                </select>
+              </th>
+              <th style={{ width: '90px', backgroundColor: '#27ae60', padding: '4px' }}>
+                <select
+                  name="acName"
+                  value={filters.acName}
+                  onChange={handleFilterChange}
+                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                >
+                  <option value="">All Name</option>
+                  {uniqueAcName.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </th>
+              <th style={{ width: '300px', backgroundColor: '#27ae60', padding: '4px' }}>
+                <input
+                  type="text"
+                  name="description"
+                  placeholder="Description"
+                  value={filters.description}
+                  onChange={handleFilterChange}
+                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                />
+              </th>
+              <th style={{ width: '70px', backgroundColor: '#27ae60', padding: '4px' }}>
+                <select
+                  name="method"
+                  value={filters.method}
+                  onChange={handleFilterChange}
+                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                >
+                  <option value="">All Method</option>
+                  {uniqueMethod.map(method => (
+                    <option key={method} value={method}>{method}</option>
+                  ))}
+                </select>
+              </th>
+              <th style={{ width: '85px', backgroundColor: '#27ae60', padding: '4px' }}>
+                <input
+                  type="text"
+                  name="debit"
+                  placeholder="Debit"
+                  value={filters.debit}
+                  onChange={handleFilterChange}
+                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                />
+              </th>
+              <th style={{ width: '85px', backgroundColor: '#27ae60', padding: '4px' }}>
+                <input
+                  type="text"
+                  name="credit"
+                  placeholder="Credit"
+                  value={filters.credit}
+                  onChange={handleFilterChange}
+                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                />
+              </th>
+              <th style={{ width: '85px', backgroundColor: '#27ae60', padding: '4px' }}>
+                <select
+                  name="transfer"
+                  value={filters.transfer}
+                  onChange={handleFilterChange}
+                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                >
+                  <option value="">All Transfer</option>
+                  {uniqueTransfer.map(transfer => (
+                    <option key={transfer} value={transfer}>{transfer}</option>
+                  ))}
+                </select>
+              </th>
+              <th style={{ textAlign: 'center', backgroundColor: '#27ae60' }}>
+                <button 
+                  onClick={clearFilters} 
+                  style={{ 
+                    padding: '2px 6px', 
+                    fontSize: '9px', 
+                    backgroundColor: '#e74c3c', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: '2px', 
+                    cursor: 'pointer' 
+                  }}
+                >
+                  Clear
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredEntries.map((entry, index) => (
+              <tr key={index} style={{ borderBottom: '1px solid #ecf0f1', backgroundColor: index % 2 === 0 ? '#ffffff' : '#f8f9fa' }}>
+                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '80px' }}>{formatDate(entry.date)}</td>
+                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '60px' }}>{entry.fy}</td>
+                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '80px' }}>{entry.acHead}</td>
+                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '90px' }}>{entry.acName}</td>
+                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '300px', wordWrap: 'break-word', maxWidth: '300px' }}>{entry.description}</td>
+                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '70px' }}>{entry.method}</td>
+                <td style={{ padding: 4, fontSize: 11, textAlign: 'right', borderRight: '1px solid #ecf0f1', color: '#e74c3c', fontWeight: 'bold', width: '85px' }}>{formatNumber(entry.debit)}</td>
+                <td style={{ padding: 4, fontSize: 11, textAlign: 'right', borderRight: '1px solid #ecf0f1', color: '#2ecc71', fontWeight: 'bold', width: '85px' }}>{formatNumber(entry.credit)}</td>
+                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '85px' }}>{entry.transfer}</td>
+                <td style={{ padding: 4, fontSize: 11, width: '80px', textAlign: 'center' }}>
+                  <button onClick={() => handleEdit(index)} style={{ marginRight: 2, padding: '2px 4px', fontSize: 9, backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: 2, cursor: 'pointer' }}>Edit</button>
+                  <button onClick={() => handleDelete(index)} style={{ padding: '2px 4px', fontSize: 9, backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: 2, cursor: 'pointer' }}>Del</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export default CashApp;
