@@ -604,8 +604,13 @@ export const DataProvider = ({ children }) => {
     // Clear and replace Firebase data
     if (user) {
       try {
-        // TODO: Implement Firebase bulk delete and add operations
-        console.log('✅ Income entries overwritten successfully');
+        console.log('🔄 Calling Firebase replaceIncomeEntries...');
+        const result = await cashBookService.replaceIncomeEntries(user.uid, newEntries);
+        if (result.success) {
+          console.log('✅ Income entries overwritten in Firebase successfully:', result.count, 'entries');
+        } else {
+          console.error('❌ Firebase overwrite failed:', result.error);
+        }
       } catch (error) {
         console.error('❌ Error overwriting income entries:', error);
       }
@@ -617,7 +622,13 @@ export const DataProvider = ({ children }) => {
     setOfficeEntries(newEntries);
     if (user) {
       try {
-        console.log('✅ Office entries overwritten successfully');
+        console.log('🔄 Calling Firebase replaceExpenseEntries (office)...');
+        const result = await cashBookService.replaceExpenseEntries(user.uid, newEntries, 'office');
+        if (result.success) {
+          console.log('✅ Office entries overwritten in Firebase successfully:', result.count, 'entries');
+        } else {
+          console.error('❌ Firebase overwrite failed:', result.error);
+        }
       } catch (error) {
         console.error('❌ Error overwriting office entries:', error);
       }
@@ -629,7 +640,13 @@ export const DataProvider = ({ children }) => {
     setSalaryEntries(newEntries);
     if (user) {
       try {
-        console.log('✅ Salary entries overwritten successfully');
+        console.log('🔄 Calling Firebase replaceExpenseEntries (salary)...');
+        const result = await cashBookService.replaceExpenseEntries(user.uid, newEntries, 'salary');
+        if (result.success) {
+          console.log('✅ Salary entries overwritten in Firebase successfully:', result.count, 'entries');
+        } else {
+          console.error('❌ Firebase overwrite failed:', result.error);
+        }
       } catch (error) {
         console.error('❌ Error overwriting salary entries:', error);
       }
@@ -641,7 +658,13 @@ export const DataProvider = ({ children }) => {
     setKitchenEntries(newEntries);
     if (user) {
       try {
-        console.log('✅ Kitchen entries overwritten successfully');
+        console.log('🔄 Calling Firebase replaceExpenseEntries (kitchen)...');
+        const result = await cashBookService.replaceExpenseEntries(user.uid, newEntries, 'kitchen');
+        if (result.success) {
+          console.log('✅ Kitchen entries overwritten in Firebase successfully:', result.count, 'entries');
+        } else {
+          console.error('❌ Firebase overwrite failed:', result.error);
+        }
       } catch (error) {
         console.error('❌ Error overwriting kitchen entries:', error);
       }
@@ -653,7 +676,13 @@ export const DataProvider = ({ children }) => {
     setBankEntries(newEntries);
     if (user) {
       try {
-        console.log('✅ Bank entries overwritten successfully');
+        console.log('🔄 Calling Firebase replaceBankEntries...');
+        const result = await cashBookService.replaceBankEntries(user.uid, newEntries);
+        if (result.success) {
+          console.log('✅ Bank entries overwritten in Firebase successfully:', result.count, 'entries');
+        } else {
+          console.error('❌ Firebase overwrite failed:', result.error);
+        }
       } catch (error) {
         console.error('❌ Error overwriting bank entries:', error);
       }
@@ -665,7 +694,13 @@ export const DataProvider = ({ children }) => {
     setCashEntries(newEntries);
     if (user) {
       try {
-        console.log('✅ Cash entries overwritten successfully');
+        console.log('🔄 Calling Firebase replaceCashEntries...');
+        const result = await cashBookService.replaceCashEntries(user.uid, newEntries);
+        if (result.success) {
+          console.log('✅ Cash entries overwritten in Firebase successfully:', result.count, 'entries');
+        } else {
+          console.error('❌ Firebase overwrite failed:', result.error);
+        }
       } catch (error) {
         console.error('❌ Error overwriting cash entries:', error);
       }

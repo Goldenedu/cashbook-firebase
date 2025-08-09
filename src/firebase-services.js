@@ -192,6 +192,123 @@ export const cashBookService = {
 
   subscribeToCustomers(userId, callback) {
     return dbService.subscribeToCollection("customers", callback, userId);
+  },
+
+  // Bulk operations for CSV overwrite functionality
+  async replaceIncomeEntries(userId, newEntries) {
+    try {
+      // First, delete all existing entries for this user
+      const existingResult = await this.getIncomeEntries(userId);
+      if (existingResult.success) {
+        for (const entry of existingResult.data) {
+          await dbService.deleteDocument("income_entries", entry.id);
+        }
+      }
+      
+      // Then, add all new entries
+      const results = [];
+      for (const entry of newEntries) {
+        const result = await this.addIncomeEntry(userId, entry);
+        results.push(result);
+      }
+      
+      return { success: true, count: newEntries.length };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  async replaceExpenseEntries(userId, newEntries, type) {
+    try {
+      // First, delete all existing entries of this type for this user
+      const existingResult = await this.getExpenseEntries(userId);
+      if (existingResult.success) {
+        const entriesToDelete = existingResult.data.filter(entry => entry.type === type);
+        for (const entry of entriesToDelete) {
+          await dbService.deleteDocument("expense_entries", entry.id);
+        }
+      }
+      
+      // Then, add all new entries with the specified type
+      const results = [];
+      for (const entry of newEntries) {
+        const result = await this.addExpenseEntry(userId, { ...entry, type });
+        results.push(result);
+      }
+      
+      return { success: true, count: newEntries.length };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  async replaceBankEntries(userId, newEntries) {
+    try {
+      // First, delete all existing entries for this user
+      const existingResult = await this.getBankEntries(userId);
+      if (existingResult.success) {
+        for (const entry of existingResult.data) {
+          await dbService.deleteDocument("bank_entries", entry.id);
+        }
+      }
+      
+      // Then, add all new entries
+      const results = [];
+      for (const entry of newEntries) {
+        const result = await this.addBankEntry(userId, entry);
+        results.push(result);
+      }
+      
+      return { success: true, count: newEntries.length };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  async replaceCashEntries(userId, newEntries) {
+    try {
+      // First, delete all existing entries for this user
+      const existingResult = await this.getCashEntries(userId);
+      if (existingResult.success) {
+        for (const entry of existingResult.data) {
+          await dbService.deleteDocument("cash_entries", entry.id);
+        }
+      }
+      
+      // Then, add all new entries
+      const results = [];
+      for (const entry of newEntries) {
+        const result = await this.addCashEntry(userId, entry);
+        results.push(result);
+      }
+      
+      return { success: true, count: newEntries.length };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  async replaceCustomers(userId, newCustomers) {
+    try {
+      // First, delete all existing customers for this user
+      const existingResult = await this.getCustomers(userId);
+      if (existingResult.success) {
+        for (const customer of existingResult.data) {
+          await dbService.deleteDocument("customers", customer.id);
+        }
+      }
+      
+      // Then, add all new customers
+      const results = [];
+      for (const customer of newCustomers) {
+        const result = await this.addCustomer(userId, customer);
+        results.push(result);
+      }
+      
+      return { success: true, count: newCustomers.length };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   }
 };
 
