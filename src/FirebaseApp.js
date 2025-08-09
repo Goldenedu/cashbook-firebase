@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import FirebaseAuth from './components/FirebaseAuth';
+import CSVDebugHelper from './components/CSVDebugHelper';
 import { FirebaseDataProvider, useFirebaseData } from './FirebaseDataContext';
 import { useData } from './DataContext'; // Your existing data context
 import './App.css';
@@ -10,6 +11,7 @@ import Dashboard from './Dashboard';
 const FirebaseIntegratedApp = () => {
   const [user, setUser] = useState(null);
   const [showSyncPanel, setShowSyncPanel] = useState(false);
+  const [showDebugHelper, setShowDebugHelper] = useState(false);
 
   const handleAuthSuccess = (authenticatedUser) => {
     setUser(authenticatedUser);
@@ -22,6 +24,7 @@ const FirebaseIntegratedApp = () => {
   return (
     <FirebaseDataProvider>
       <div className="firebase-app">
+        {showDebugHelper && <CSVDebugHelper />}
         <SyncPanel show={showSyncPanel} onClose={() => setShowSyncPanel(false)} />
         <div className="app-header">
           <div className="header-left">
@@ -35,6 +38,13 @@ const FirebaseIntegratedApp = () => {
               onClick={() => setShowSyncPanel(true)}
             >
               🔄 Sync
+            </button>
+            <button 
+              className="sync-button"
+              onClick={() => setShowDebugHelper(!showDebugHelper)}
+              style={{ background: showDebugHelper ? '#e74c3c' : '#f39c12' }}
+            >
+              🔍 CSV Debug
             </button>
           </div>
         </div>
