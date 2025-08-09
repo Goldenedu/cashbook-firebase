@@ -172,7 +172,9 @@ function BankApp() {
   });
 
   const handleSubmit = async (e) => {
+    console.log('🔍 BankApp: handleSubmit function called!');
     e.preventDefault();
+    console.log('🔍 BankApp: preventDefault called, starting form processing...');
     
     try {
       if (editIndex !== null) {
