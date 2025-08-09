@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { universalCSVImport, generateSampleCSV } from '../utils/csvImportFix';
+import { excelFormatCSVImport, generateExcelFormatSampleCSV } from '../utils/excelFormatCSVImport';
 
 const CSVImportTest = ({ onClose }) => {
   const [selectedBookType, setSelectedBookType] = useState('bank');
@@ -22,7 +22,7 @@ const CSVImportTest = ({ onClose }) => {
     setLoading(true);
     setImportResult('Processing CSV file...');
 
-    universalCSVImport(
+    excelFormatCSVImport(
       file,
       selectedBookType,
       // Success callback
@@ -34,11 +34,19 @@ const CSVImportTest = ({ onClose }) => {
         resultText += `• Successful imports: ${result.successfulRows}\n`;
         resultText += `• Skipped rows: ${result.skippedRows}\n\n`;
         
+        if (result.errors && result.errors.length > 0) {
+          resultText += `⚠️ Warnings:\n`;
+          result.errors.forEach(error => {
+            resultText += `• ${error}\n`;
+          });
+          resultText += `\n`;
+        }
+        
         if (result.data.length > 0) {
           resultText += `📝 Sample imported data:\n`;
           const sample = result.data[0];
           Object.keys(sample).forEach(key => {
-            if (key !== 'id' && key !== 'importedAt') {
+            if (key !== 'id' && key !== 'entryDate') {
               resultText += `• ${key}: "${sample[key]}"\n`;
             }
           });
@@ -49,7 +57,7 @@ const CSVImportTest = ({ onClose }) => {
       // Error callback
       (error) => {
         setLoading(false);
-        setImportResult(`❌ Import Failed:\n\n${error}\n\n💡 Tips:\n• Make sure file has .csv extension\n• First row should contain column headers\n• Check for proper CSV formatting\n• Try the sample CSV first`);
+        setImportResult(`❌ Import Failed:\n\n${error}\n\n💡 Excel Format Required:\n• CSV must match your Excel export format exactly\n• Use the same column headers and order\n• Download sample CSV to see correct format`);
       }
     );
 
@@ -58,18 +66,18 @@ const CSVImportTest = ({ onClose }) => {
   };
 
   const downloadSample = () => {
-    const sampleContent = generateSampleCSV(selectedBookType);
+    const sampleContent = generateExcelFormatSampleCSV(selectedBookType);
     const blob = new Blob([sampleContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `sample_${selectedBookType}_book.csv`;
+    a.download = `sample_${selectedBookType}_book_excel_format.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     
-    setImportResult(`📥 Sample CSV downloaded for ${selectedBookType} book!\n\nUse this file as a template for your data format.`);
+    setImportResult(`📥 Excel-format sample CSV downloaded for ${selectedBookType} book!\n\nThis CSV uses the exact same format as your Excel export.\nColumns and order match perfectly for easy import.`);
   };
 
   return (

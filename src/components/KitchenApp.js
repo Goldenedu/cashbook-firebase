@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { useData } from '../DataContext';
+import { universalCSVImport } from '../utils/csvImportFix';
 
 function KitchenApp() {
   const { kitchenEntries, setKitchenEntries, addKitchenEntry, deleteKitchenEntry, updateFirestoreDoc } = useData();
@@ -266,37 +267,25 @@ function KitchenApp() {
 
     const importFromCSV = (e) => {
       const file = e.target.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          try {
-            const csvText = event.target.result;
-            const lines = csvText.split('\n').filter(line => line.trim());
+      if (!file) return;
 
-            if (lines.length < 2) {
-              alert('CSV file must have at least a header row and one data row.');
-              return;
-            }
+      universalCSVImport(
+        file,
+        'kitchen',
+        // Success callback
+        (result) => {
+          setKitchenEntries(prev => [...prev, ...result.data]);
+          alert(`✅ ${result.message}\n\nImported ${result.successfulRows} entries successfully!`);
+        },
+        // Error callback
+        (error) => {
+          alert(`❌ CSV Import Failed:\n\n${error}\n\n💡 Tips:\n• Check file format (.csv)\n• Ensure proper headers\n• Try the CSV Fix tool for testing`);
+        }
+      );
 
-            const parseCSVLine = (line) => {
-              const result = [];
-              let current = '';
-              let inQuotes = false;
-
-              for (let i = 0; i < line.length; i++) {
-                const char = line[i];
-                if (char === '"') {
-                  inQuotes = !inQuotes;
-                } else if (char === ',' && !inQuotes) {
-                  result.push(current.trim());
-                  current = '';
-                } else {
-                  current += char;
-                }
-              }
-              result.push(current.trim());
-              return result;
-            };
+      // Reset file input
+      e.target.value = '';
+    };
 
             const headers = parseCSVLine(lines[0]).map(h => h.replace(/"/g, '').trim());
             console.log('CSV Headers found:', headers);

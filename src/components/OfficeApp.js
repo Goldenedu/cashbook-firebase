@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { useData } from '../DataContext';
+import { excelFormatCSVImport } from '../utils/excelFormatCSVImport';
 
 function OfficeApp() {
   const { officeEntries, setOfficeEntries, addOfficeEntry, deleteOfficeEntry, updateFirestoreDoc } = useData();
@@ -306,134 +307,24 @@ function OfficeApp() {
 
   const importFromCSV = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        try {
-          const csvText = event.target.result;
-          const lines = csvText.split('\n').filter(line => line.trim());
-          
-          if (lines.length < 2) {
-            alert('CSV file must have at least a header row and one data row.');
-            return;
-          }
-          
-          const parseCSVLine = (line) => {
-            const result = [];
-            let current = '';
-            let inQuotes = false;
-            
-            for (let i = 0; i < line.length; i++) {
-              const char = line[i];
-              if (char === '"') {
-                inQuotes = !inQuotes;
-              } else if (char === ',' && !inQuotes) {
-                result.push(current.trim());
-                current = '';
-              } else {
-                current += char;
-              }
-            }
-            result.push(current.trim());
-            return result;
-          };
-          
-          const headers = parseCSVLine(lines[0]).map(h => h.replace(/"/g, '').trim());
-          console.log('CSV Headers found:', headers);
-          console.log('Expected order: Date, FY, A/C Head, A/C Class, Description, Method, Credit, Entry Date');
-          
-          const csvData = [];
-          for (let i = 1; i < lines.length; i++) {
-            const values = parseCSVLine(lines[i]).map(v => v.replace(/"/g, '').trim());
-            console.log(`Row ${i + 1} raw data:`, values);
-            
-            if (values.length === 0 || (values.length === 1 && values[0] === '')) {
-              console.log(`Skipping empty row ${i + 1}`);
-              continue;
-            }
-            
-            const entry = {
-              date: '',
-              fy: '',
-              acHead: 'Advance / Refund',
-              acClass: 'Advance / Refund',
-              method: 'Cash',
-              credit: '',
-              description: '',
-              entryDate: new Date().toISOString().split('T')[0] // Auto-fill with current date
-            };
-            
-            // FLEXIBLE MAPPING - Same as Bank Book approach
-            console.log(`Row ${i + 1} raw data:`, values);
-            
-            // Map CSV columns - handle flexible column counts (same as Bank Book)
-            const maxCols = Math.max(headers.length, values.length);
-            for (let j = 0; j < maxCols; j++) {
-              const header = (headers[j] || '').toLowerCase().trim();
-              const value = (values[j] || '').trim();
-              
-              console.log(`  Column ${j + 1}: "${headers[j] || 'undefined'}" = "${value}"`);
-              
-              // Map by column position first, then by header name (same as Bank Book)
-              if (j === 0 || header.includes('date')) {
-                if (value) {
-                  entry.date = value;
-                  // Auto-calculate FY from date
-                  const calculatedFY = calculateFY(value);
-                  entry.fy = calculatedFY ? `FY ${calculatedFY}` : '';
-                  console.log(`Date: ${value} -> Calculated FY: ${entry.fy}`);
-                }
-              } else if (j === 1 || header.includes('fy') || header.includes('fiscal')) {
-                // Use CSV FY data if available, otherwise keep calculated FY
-                if (value && value.trim() !== '') {
-                  entry.fy = value;
-                  console.log(`Using CSV FY: ${entry.fy}`);
-                } else if (entry.date) {
-                  // Ensure FY is calculated if CSV FY is empty
-                  const calculatedFY = calculateFY(entry.date);
-                  entry.fy = calculatedFY ? `FY ${calculatedFY}` : entry.fy;
-                  console.log(`Fallback FY calculation: ${entry.fy}`);
-                }
-              } else if (j === 2 || header.includes('head') || header.includes('a/c head') || header.includes('account head')) {
-                entry.acHead = value || 'Advance / Refund';
-              } else if (j === 3 || header.includes('class') || header.includes('a/c class') || header.includes('account class')) {
-                entry.acClass = value || 'Advance / Refund';
-              } else if (j === 4 || header.includes('description') || header.includes('desc')) {
-                entry.description = value;
-              } else if (j === 5 || header.includes('method')) {
-                entry.method = value || 'Cash';
-              } else if (j === 6 || header.includes('credit')) {
-                // Handle quoted numbers with commas like "33,000"
-                const cleanValue = value.replace(/"/g, '').replace(/,/g, '').trim();
-                if (cleanValue && cleanValue !== '' && !isNaN(parseFloat(cleanValue))) {
-                  entry.credit = parseFloat(cleanValue);
-                  console.log(`    Mapped credit: ${cleanValue} -> ${entry.credit}`);
-                } else {
-                  console.log(`    Empty/invalid credit value: "${value}"`);
-                }
-              } else if (j === 7 || header.includes('entry date')) {
-                // Skip entry date column - we auto-generate this
-                console.log(`    Skipping entry date: ${value}`);
-              }
-            }
-            
-            console.log(`Row ${i + 1}:`, entry);
-            csvData.push(entry);
-          }
-          
-          if (csvData.length > 0) {
-            setEntries(csvData);
-            alert(`Successfully imported ${csvData.length} entries from CSV (existing data overwritten)\n\nColumn mapping:\n${headers.map((h, i) => `Column ${i + 1}: ${h}`).join('\n')}`);
-          } else {
-            alert('No valid data rows found in CSV file.');
-          }
-        } catch (error) {
-          alert('Error reading CSV file. Please check the format.');
-          console.error('CSV Import Error:', error);
-        }
-      };
-      reader.readAsText(file);
-    }
+    if (!file) return;
+
+    excelFormatCSVImport(
+      file,
+      'office',
+      // Success callback
+      (result) => {
+        setOfficeEntries(prev => [...prev, ...result.data]);
+        alert(`✅ ${result.message}\n\nImported ${result.successfulRows} entries successfully!\n\nFormat: Excel export format (same columns and order)`);
+      },
+      // Error callback
+      (error) => {
+        alert(`❌ CSV Import Failed:\n\n${error}\n\n💡 Solution:\n• CSV must match Excel export format exactly\n• Use the CSV Fix tool to download correct sample`);
+      }
+    );
+
+    // Reset file input
+    e.target.value = '';
   };
 
 

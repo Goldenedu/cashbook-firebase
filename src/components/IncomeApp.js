@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { useData } from '../DataContext';
+import { excelFormatCSVImport } from '../utils/excelFormatCSVImport';
 
 function IncomeApp() {
   const { incomeEntries, setIncomeEntries, customers, addIncomeEntry, deleteIncomeEntry, updateFirestoreDoc } = useData();
@@ -135,34 +136,24 @@ function IncomeApp() {
   // CSV Import functionality
   const importFromCSV = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const csvData = event.target.result;
-        const lines = csvData.split('\n');
-        const headers = lines[0].split(',').map(h => h.trim());
-        const parsedData = [];
-        
-        for (let i = 1; i < lines.length; i++) {
-          if (lines[i].trim()) {
-            const values = lines[i].split(',').map(v => v.trim());
-            const entry = {};
-            headers.forEach((header, index) => {
-              entry[header] = values[index] || '';
-            });
-            // Auto-generate FY for imported entries
-            if (entry.date) {
-              entry.fy = generateFY(entry.date);
-            }
-            parsedData.push(entry);
-          }
-        }
-        setEntries(parsedData);
-        alert(`Imported ${parsedData.length} entries successfully (existing data overwritten)!`);
-      };
-      reader.readAsText(file);
-      e.target.value = ''; // Reset file input
-    }
+    if (!file) return;
+
+    excelFormatCSVImport(
+      file,
+      'income',
+      // Success callback
+      (result) => {
+        setIncomeEntries(prev => [...prev, ...result.data]);
+        alert(`✅ ${result.message}\n\nImported ${result.successfulRows} entries successfully!\n\nFormat: Excel export format (same columns and order)`);
+      },
+      // Error callback
+      (error) => {
+        alert(`❌ CSV Import Failed:\n\n${error}\n\n💡 Solution:\n• CSV must match Excel export format exactly\n• Use the CSV Fix tool to download correct sample`);
+      }
+    );
+
+    // Reset file input
+    e.target.value = '';
   };
 
   // Auto-fill name logic

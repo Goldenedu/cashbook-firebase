@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { useData } from '../DataContext';
+import { excelFormatCSVImport } from '../utils/excelFormatCSVImport';
 
 function CustomerApp() {
   const { customers, setCustomers, deleteCustomer } = useData();
@@ -315,84 +316,24 @@ function CustomerApp() {
 
   const importFromCSV = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const csvData = event.target.result;
-        const lines = csvData.split('\n');
-        const headers = lines[0].split(',').map(h => h.trim());
-        
-        const parsedData = [];
-        for (let i = 1; i < lines.length; i++) {
-          if (lines[i].trim()) {
-            const values = lines[i].split(',').map(v => v.trim());
-            const entry = {};
-            
-            // Map CSV headers to component properties
-            headers.forEach((header, index) => {
-              const value = values[index] || '';
-              switch(header) {
-                case 'Date':
-                  // Convert numeric date to proper date format
-                  if (!isNaN(value) && value !== '') {
-                    // Assuming it's Excel date serial number
-                    const excelDate = new Date((value - 25569) * 86400 * 1000);
-                    entry.date = excelDate.toISOString().split('T')[0];
-                  } else {
-                    entry.date = value;
-                  }
-                  break;
-                case 'ID':
-                  // Convert old format to new ID format if needed
-                  if (value && !value.startsWith('ID-')) {
-                    entry.customId = `ID-${String(value).padStart(4, '0')}`;
-                  } else {
-                    entry.customId = value;
-                  }
-                  break;
-                case 'A/C Head':
-                  entry.acHead = value;
-                  break;
-                case 'A/C Name':
-                  entry.acName = value;
-                  break;
-                case 'Gender':
-                  entry.gender = value;
-                  break;
-                case 'Name':
-                  entry.name = value;
-                  break;
-                case 'Remark':
-                  entry.remark = value;
-                  break;
-                case 'Entry Date':
-                  // Convert numeric date to proper date format if needed
-                  if (!isNaN(value) && value !== '') {
-                    const excelDate = new Date((value - 25569) * 86400 * 1000);
-                    entry.entryDate = excelDate.toISOString().split('T')[0];
-                  } else {
-                    entry.entryDate = value || today;
-                  }
-                  break;
-                default:
-                  entry[header] = value;
-              }
-            });
-            
-            entry.id = Date.now() + i;
-            entry.displayName = formatName(entry.acName, entry.gender, entry.name);
-            // Set entryDate to today if not provided
-            if (!entry.entryDate) {
-              entry.entryDate = today;
-            }
-            parsedData.push(entry);
-          }
-        }
-        // Replace existing data instead of adding to it to prevent duplicates
-        setCustomers(parsedData);
-      };
-      reader.readAsText(file);
-    }
+    if (!file) return;
+
+    excelFormatCSVImport(
+      file,
+      'customer',
+      // Success callback
+      (result) => {
+        setCustomers(prev => [...prev, ...result.data]);
+        alert(`✅ ${result.message}\n\nImported ${result.successfulRows} entries successfully!\n\nFormat: Excel export format (same columns and order)`);
+      },
+      // Error callback
+      (error) => {
+        alert(`❌ CSV Import Failed:\n\n${error}\n\n💡 Solution:\n• CSV must match Excel export format exactly\n• Use the CSV Fix tool to download correct sample`);
+      }
+    );
+
+    // Reset file input
+    e.target.value = '';
   };
 
   return (
