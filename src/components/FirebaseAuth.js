@@ -5,7 +5,7 @@ import './FirebaseAuth.css';
 const FirebaseAuth = ({ onAuthSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('goldeneduprivateschool@gmail.com');
-  const [password, setPassword] = useState('Admin');
+  const [password, setPassword] = useState('Admin123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [user, setUser] = useState(null);
