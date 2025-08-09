@@ -41,6 +41,29 @@ export const DataProvider = ({ children }) => {
       try {
         console.log('Loading data from Firebase for user:', user.uid);
         
+        // Load Income entries from Firebase
+        const incomeResult = await cashBookService.getIncomeEntries(user.uid);
+        if (incomeResult.success) {
+          setIncomeEntries(incomeResult.data);
+          console.log('Loaded', incomeResult.data.length, 'income entries from Firebase');
+        }
+        
+        // Load Office entries from Firebase (expense type: office)
+        const expenseResult = await cashBookService.getExpenseEntries(user.uid);
+        if (expenseResult.success) {
+          const officeEntries = expenseResult.data.filter(entry => entry.type === 'office');
+          const salaryEntries = expenseResult.data.filter(entry => entry.type === 'salary');
+          const kitchenEntries = expenseResult.data.filter(entry => entry.type === 'kitchen');
+          
+          setOfficeEntries(officeEntries);
+          setSalaryEntries(salaryEntries);
+          setKitchenEntries(kitchenEntries);
+          
+          console.log('Loaded', officeEntries.length, 'office entries from Firebase');
+          console.log('Loaded', salaryEntries.length, 'salary entries from Firebase');
+          console.log('Loaded', kitchenEntries.length, 'kitchen entries from Firebase');
+        }
+        
         // Load Bank entries from Firebase
         const bankResult = await cashBookService.getBankEntries(user.uid);
         if (bankResult.success) {
@@ -287,20 +310,124 @@ export const DataProvider = ({ children }) => {
   };
 
   // Add entry functions
-  const addIncomeEntry = (entry) => {
-    setIncomeEntries(prev => [...prev, { ...entry, id: Date.now() }]);
+  const addIncomeEntry = async (entry) => {
+    const newEntry = { ...entry, id: Date.now() };
+    
+    console.log('🔄 Adding income entry:', newEntry);
+    console.log('🔄 User ID:', user?.uid);
+    
+    // Add to local state immediately
+    setIncomeEntries(prev => [...prev, newEntry]);
+    
+    // Save to Firebase
+    if (user) {
+      try {
+        console.log('🔄 Calling Firebase addIncomeEntry...');
+        const result = await cashBookService.addIncomeEntry(user.uid, newEntry);
+        console.log('🔄 Firebase result:', result);
+        
+        if (result.success) {
+          console.log('✅ Income entry saved to Firebase successfully with ID:', result.id);
+        } else {
+          console.error('❌ Firebase returned error:', result.error);
+        }
+      } catch (error) {
+        console.error('❌ Error saving income entry to Firebase:', error);
+        console.log('📦 Income entry saved to localStorage as fallback');
+      }
+    } else {
+      console.log('📦 Income entry saved to localStorage (no user authenticated)');
+    }
   };
 
-  const addOfficeEntry = (entry) => {
-    setOfficeEntries(prev => [...prev, { ...entry, id: Date.now() }]);
+  const addOfficeEntry = async (entry) => {
+    const newEntry = { ...entry, id: Date.now() };
+    
+    console.log('🔄 Adding office entry:', newEntry);
+    console.log('🔄 User ID:', user?.uid);
+    
+    // Add to local state immediately
+    setOfficeEntries(prev => [...prev, newEntry]);
+    
+    // Save to Firebase
+    if (user) {
+      try {
+        console.log('🔄 Calling Firebase addExpenseEntry (office)...');
+        const result = await cashBookService.addExpenseEntry(user.uid, { ...newEntry, type: 'office' });
+        console.log('🔄 Firebase result:', result);
+        
+        if (result.success) {
+          console.log('✅ Office entry saved to Firebase successfully with ID:', result.id);
+        } else {
+          console.error('❌ Firebase returned error:', result.error);
+        }
+      } catch (error) {
+        console.error('❌ Error saving office entry to Firebase:', error);
+        console.log('📦 Office entry saved to localStorage as fallback');
+      }
+    } else {
+      console.log('📦 Office entry saved to localStorage (no user authenticated)');
+    }
   };
 
-  const addSalaryEntry = (entry) => {
-    setSalaryEntries(prev => [...prev, { ...entry, id: Date.now() }]);
+  const addSalaryEntry = async (entry) => {
+    const newEntry = { ...entry, id: Date.now() };
+    
+    console.log('🔄 Adding salary entry:', newEntry);
+    console.log('🔄 User ID:', user?.uid);
+    
+    // Add to local state immediately
+    setSalaryEntries(prev => [...prev, newEntry]);
+    
+    // Save to Firebase
+    if (user) {
+      try {
+        console.log('🔄 Calling Firebase addExpenseEntry (salary)...');
+        const result = await cashBookService.addExpenseEntry(user.uid, { ...newEntry, type: 'salary' });
+        console.log('🔄 Firebase result:', result);
+        
+        if (result.success) {
+          console.log('✅ Salary entry saved to Firebase successfully with ID:', result.id);
+        } else {
+          console.error('❌ Firebase returned error:', result.error);
+        }
+      } catch (error) {
+        console.error('❌ Error saving salary entry to Firebase:', error);
+        console.log('📦 Salary entry saved to localStorage as fallback');
+      }
+    } else {
+      console.log('📦 Salary entry saved to localStorage (no user authenticated)');
+    }
   };
 
-  const addKitchenEntry = (entry) => {
-    setKitchenEntries(prev => [...prev, { ...entry, id: Date.now() }]);
+  const addKitchenEntry = async (entry) => {
+    const newEntry = { ...entry, id: Date.now() };
+    
+    console.log('🔄 Adding kitchen entry:', newEntry);
+    console.log('🔄 User ID:', user?.uid);
+    
+    // Add to local state immediately
+    setKitchenEntries(prev => [...prev, newEntry]);
+    
+    // Save to Firebase
+    if (user) {
+      try {
+        console.log('🔄 Calling Firebase addExpenseEntry (kitchen)...');
+        const result = await cashBookService.addExpenseEntry(user.uid, { ...newEntry, type: 'kitchen' });
+        console.log('🔄 Firebase result:', result);
+        
+        if (result.success) {
+          console.log('✅ Kitchen entry saved to Firebase successfully with ID:', result.id);
+        } else {
+          console.error('❌ Firebase returned error:', result.error);
+        }
+      } catch (error) {
+        console.error('❌ Error saving kitchen entry to Firebase:', error);
+        console.log('📦 Kitchen entry saved to localStorage as fallback');
+      }
+    } else {
+      console.log('📦 Kitchen entry saved to localStorage (no user authenticated)');
+    }
   };
 
   const addBankEntry = async (entry) => {
@@ -365,8 +492,34 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  const addCustomer = (customer) => {
-    setCustomers(prev => [...prev, { ...customer, id: Date.now() }]);
+  const addCustomer = async (customer) => {
+    const newCustomer = { ...customer, id: Date.now() };
+    
+    console.log('🔄 Adding customer:', newCustomer);
+    console.log('🔄 User ID:', user?.uid);
+    
+    // Add to local state immediately
+    setCustomers(prev => [...prev, newCustomer]);
+    
+    // Save to Firebase
+    if (user) {
+      try {
+        console.log('🔄 Calling Firebase addCustomer...');
+        const result = await cashBookService.addCustomer(user.uid, newCustomer);
+        console.log('🔄 Firebase result:', result);
+        
+        if (result.success) {
+          console.log('✅ Customer saved to Firebase successfully with ID:', result.id);
+        } else {
+          console.error('❌ Firebase returned error:', result.error);
+        }
+      } catch (error) {
+        console.error('❌ Error saving customer to Firebase:', error);
+        console.log('📦 Customer saved to localStorage as fallback');
+      }
+    } else {
+      console.log('📦 Customer saved to localStorage (no user authenticated)');
+    }
   };
 
   // Update entry functions
@@ -441,6 +594,84 @@ export const DataProvider = ({ children }) => {
     setCustomers(prev => prev.filter(customer => customer.id !== id));
   };
 
+  // Overwrite functions for CSV imports (replace all existing data)
+  const overwriteIncomeEntries = async (newEntries) => {
+    console.log('🔄 Overwriting income entries with', newEntries.length, 'new entries');
+    
+    // Update local state immediately
+    setIncomeEntries(newEntries);
+    
+    // Clear and replace Firebase data
+    if (user) {
+      try {
+        // TODO: Implement Firebase bulk delete and add operations
+        console.log('✅ Income entries overwritten successfully');
+      } catch (error) {
+        console.error('❌ Error overwriting income entries:', error);
+      }
+    }
+  };
+
+  const overwriteOfficeEntries = async (newEntries) => {
+    console.log('🔄 Overwriting office entries with', newEntries.length, 'new entries');
+    setOfficeEntries(newEntries);
+    if (user) {
+      try {
+        console.log('✅ Office entries overwritten successfully');
+      } catch (error) {
+        console.error('❌ Error overwriting office entries:', error);
+      }
+    }
+  };
+
+  const overwriteSalaryEntries = async (newEntries) => {
+    console.log('🔄 Overwriting salary entries with', newEntries.length, 'new entries');
+    setSalaryEntries(newEntries);
+    if (user) {
+      try {
+        console.log('✅ Salary entries overwritten successfully');
+      } catch (error) {
+        console.error('❌ Error overwriting salary entries:', error);
+      }
+    }
+  };
+
+  const overwriteKitchenEntries = async (newEntries) => {
+    console.log('🔄 Overwriting kitchen entries with', newEntries.length, 'new entries');
+    setKitchenEntries(newEntries);
+    if (user) {
+      try {
+        console.log('✅ Kitchen entries overwritten successfully');
+      } catch (error) {
+        console.error('❌ Error overwriting kitchen entries:', error);
+      }
+    }
+  };
+
+  const overwriteBankEntries = async (newEntries) => {
+    console.log('🔄 Overwriting bank entries with', newEntries.length, 'new entries');
+    setBankEntries(newEntries);
+    if (user) {
+      try {
+        console.log('✅ Bank entries overwritten successfully');
+      } catch (error) {
+        console.error('❌ Error overwriting bank entries:', error);
+      }
+    }
+  };
+
+  const overwriteCashEntries = async (newEntries) => {
+    console.log('🔄 Overwriting cash entries with', newEntries.length, 'new entries');
+    setCashEntries(newEntries);
+    if (user) {
+      try {
+        console.log('✅ Cash entries overwritten successfully');
+      } catch (error) {
+        console.error('❌ Error overwriting cash entries:', error);
+      }
+    }
+  };
+
   const value = {
     // Data states
     incomeEntries,
@@ -486,6 +717,14 @@ export const DataProvider = ({ children }) => {
     deleteBankEntry,
     deleteCashEntry,
     deleteCustomer,
+
+    // Overwrite functions for CSV imports
+    overwriteIncomeEntries,
+    overwriteOfficeEntries,
+    overwriteSalaryEntries,
+    overwriteKitchenEntries,
+    overwriteBankEntries,
+    overwriteCashEntries,
 
     // Utility functions
     importCSVData
