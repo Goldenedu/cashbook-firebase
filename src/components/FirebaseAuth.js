@@ -49,32 +49,7 @@ const FirebaseAuth = ({ onAuthSuccess }) => {
     }
   };
 
-  const handleQuickAdminLogin = async () => {
-    setLoading(true);
-    setError('');
-    
-    try {
-      // First try to sign in
-      let result = await authService.signIn('goldeneduprivateschool@gmail.com', 'Admin');
-      
-      if (!result.success && result.error.includes('user-not-found')) {
-        // If user doesn't exist, create the admin account
-        result = await authService.signUp('goldeneduprivateschool@gmail.com', 'Admin');
-      }
 
-      if (result.success) {
-        if (onAuthSuccess) {
-          onAuthSuccess(result.user);
-        }
-      } else {
-        setError(result.error);
-      }
-    } catch (err) {
-      setError('Failed to setup admin account');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSignOut = async () => {
     setLoading(true);
@@ -156,21 +131,7 @@ const FirebaseAuth = ({ onAuthSuccess }) => {
           </button>
         </form>
 
-        <div className="quick-login-section">
-          <div className="divider">
-            <span>or</span>
-          </div>
-          <button 
-            onClick={handleQuickAdminLogin}
-            disabled={loading}
-            className="auth-button quick-admin-button"
-          >
-            {loading ? 'Setting up...' : 'Quick Admin Login'}
-          </button>
-          <p className="quick-login-info">
-            Use pre-configured admin account for immediate access
-          </p>
-        </div>
+
 
         <div className="auth-switch">
           <p>
