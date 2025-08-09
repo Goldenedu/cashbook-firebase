@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { cashBookService } from './firebase-services';
-import { useAuth } from './components/FirebaseAuth';
+import { authService } from './firebase-services';
 
 const DataContext = createContext();
 
@@ -14,7 +14,15 @@ export const useData = () => {
 
 export const DataProvider = ({ children }) => {
   // Get current user for Firebase operations
-  const { user } = useAuth();
+  const [user, setUser] = useState(null);
+  
+  // Set up Firebase auth state listener
+  useEffect(() => {
+    const unsubscribe = authService.onAuthStateChange((currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
   
   // Local data states (your existing data structure)
   const [incomeEntries, setIncomeEntries] = useState([]);
