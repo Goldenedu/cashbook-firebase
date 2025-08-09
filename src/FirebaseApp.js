@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import FirebaseAuth from './components/FirebaseAuth';
 import CSVDebugHelper from './components/CSVDebugHelper';
+import SimpleCSVTest from './components/SimpleCSVTest';
+import CSVImportTest from './components/CSVImportTest';
 import { FirebaseDataProvider, useFirebaseData } from './FirebaseDataContext';
 import { useData } from './DataContext'; // Your existing data context
 import './App.css';
@@ -12,6 +14,7 @@ const FirebaseIntegratedApp = () => {
   const [user, setUser] = useState(null);
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showDebugHelper, setShowDebugHelper] = useState(false);
+  const [showCSVTester, setShowCSVTester] = useState(false);
 
   const handleAuthSuccess = (authenticatedUser) => {
     setUser(authenticatedUser);
@@ -25,6 +28,7 @@ const FirebaseIntegratedApp = () => {
     <FirebaseDataProvider>
       <div className="firebase-app">
         {showDebugHelper && <CSVDebugHelper />}
+        {showCSVTester && <CSVImportTest onClose={() => setShowCSVTester(false)} />}
         <SyncPanel show={showSyncPanel} onClose={() => setShowSyncPanel(false)} />
         <div className="app-header">
           <div className="header-left">
@@ -45,6 +49,13 @@ const FirebaseIntegratedApp = () => {
               style={{ background: showDebugHelper ? '#e74c3c' : '#f39c12' }}
             >
               🔍 CSV Debug
+            </button>
+            <button 
+              className="sync-button"
+              onClick={() => setShowCSVTester(true)}
+              style={{ background: '#2ecc71' }}
+            >
+              🔧 CSV Fix
             </button>
           </div>
         </div>

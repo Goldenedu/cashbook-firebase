@@ -403,8 +403,8 @@ function BankApp() {
             alert('No valid data rows found in CSV file.');
           }
         } catch (error) {
-          alert('Error reading CSV file. Please check the format.');
           console.error('CSV Import Error:', error);
+          alert(`CSV Import Error: ${error.message}\n\nPlease check:\n- File has .csv extension\n- First row contains column headers\n- Data is properly formatted\n- File is not corrupted`);
         }
       };
       reader.readAsText(file);
