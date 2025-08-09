@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { cashBookService } from './firebase-services';
+import { useAuth } from './components/FirebaseAuth';
 
 const DataContext = createContext();
 
@@ -11,6 +13,9 @@ export const useData = () => {
 };
 
 export const DataProvider = ({ children }) => {
+  // Get current user for Firebase operations
+  const { user } = useAuth();
+  
   // Local data states (your existing data structure)
   const [incomeEntries, setIncomeEntries] = useState([]);
   const [officeEntries, setOfficeEntries] = useState([]);
@@ -20,8 +25,42 @@ export const DataProvider = ({ children }) => {
   const [cashEntries, setCashEntries] = useState([]);
   const [customers, setCustomers] = useState([]);
 
-  // Load data from localStorage on component mount
+  // Load data from Firebase when user is authenticated
   useEffect(() => {
+    const loadFirebaseData = async () => {
+      if (!user) return;
+      
+      try {
+        console.log('Loading data from Firebase for user:', user.uid);
+        
+        // Load Bank entries from Firebase
+        const bankResult = await cashBookService.getBankEntries(user.uid);
+        if (bankResult.success) {
+          setBankEntries(bankResult.data);
+          console.log('Loaded', bankResult.data.length, 'bank entries from Firebase');
+        }
+        
+        // Load Cash entries from Firebase
+        const cashResult = await cashBookService.getCashEntries(user.uid);
+        if (cashResult.success) {
+          setCashEntries(cashResult.data);
+          console.log('Loaded', cashResult.data.length, 'cash entries from Firebase');
+        }
+        
+        // Load Customers from Firebase
+        const customersResult = await cashBookService.getCustomers(user.uid);
+        if (customersResult.success) {
+          setCustomers(customersResult.data);
+          console.log('Loaded', customersResult.data.length, 'customers from Firebase');
+        }
+        
+      } catch (error) {
+        console.error('Error loading data from Firebase:', error);
+        // Fallback to localStorage if Firebase fails
+        loadLocalData();
+      }
+    };
+
     const loadLocalData = () => {
       try {
         const savedIncomeEntries = localStorage.getItem('incomeEntries');
@@ -44,8 +83,12 @@ export const DataProvider = ({ children }) => {
       }
     };
 
-    loadLocalData();
-  }, []);
+    if (user) {
+      loadFirebaseData();
+    } else {
+      loadLocalData();
+    }
+  }, [user]);
 
   // Save data to localStorage whenever state changes
   useEffect(() => {
@@ -249,12 +292,40 @@ export const DataProvider = ({ children }) => {
     setKitchenEntries(prev => [...prev, { ...entry, id: Date.now() }]);
   };
 
-  const addBankEntry = (entry) => {
-    setBankEntries(prev => [...prev, { ...entry, id: Date.now() }]);
+  const addBankEntry = async (entry) => {
+    const newEntry = { ...entry, id: Date.now() };
+    
+    // Add to local state immediately for UI responsiveness
+    setBankEntries(prev => [...prev, newEntry]);
+    
+    // Save to Firebase Firestore for permanent storage
+    if (user) {
+      try {
+        await cashBookService.addBankEntry(user.uid, newEntry);
+        console.log('Bank entry saved to Firebase successfully');
+      } catch (error) {
+        console.error('Error saving bank entry to Firebase:', error);
+        // Could add error handling here (e.g., show user notification)
+      }
+    }
   };
 
-  const addCashEntry = (entry) => {
-    setCashEntries(prev => [...prev, { ...entry, id: Date.now() }]);
+  const addCashEntry = async (entry) => {
+    const newEntry = { ...entry, id: Date.now() };
+    
+    // Add to local state immediately for UI responsiveness
+    setCashEntries(prev => [...prev, newEntry]);
+    
+    // Save to Firebase Firestore for permanent storage
+    if (user) {
+      try {
+        await cashBookService.addCashEntry(user.uid, newEntry);
+        console.log('Cash entry saved to Firebase successfully');
+      } catch (error) {
+        console.error('Error saving cash entry to Firebase:', error);
+        // Could add error handling here (e.g., show user notification)
+      }
+    }
   };
 
   const addCustomer = (customer) => {
