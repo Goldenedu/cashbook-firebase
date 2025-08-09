@@ -204,7 +204,16 @@ function BankApp() {
         };
         
         console.log('Processed bank entry data:', entryData);
-        await addBankEntry(entryData);
+        console.log('🔍 BankApp: About to call addBankEntry function...');
+        console.log('🔍 BankApp: addBankEntry function type:', typeof addBankEntry);
+        
+        if (typeof addBankEntry === 'function') {
+          console.log('🔍 BankApp: Calling addBankEntry...');
+          await addBankEntry(entryData);
+          console.log('🔍 BankApp: addBankEntry call completed');
+        } else {
+          console.error('❌ BankApp: addBankEntry is not a function!', addBankEntry);
+        }
       }
       clearForm();
       alert('Bank entry saved successfully!');
