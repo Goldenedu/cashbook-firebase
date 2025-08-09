@@ -343,6 +343,15 @@ export const DataProvider = ({ children }) => {
     cashEntries,
     customers,
 
+    // Setter functions
+    setIncomeEntries,
+    setOfficeEntries,
+    setSalaryEntries,
+    setKitchenEntries,
+    setBankEntries,
+    setCashEntries,
+    setCustomers,
+
     // Add functions
     addIncomeEntry,
     addOfficeEntry,

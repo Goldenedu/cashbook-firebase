@@ -309,7 +309,7 @@ function CashApp() {
       'cash',
       // Success callback
       (result) => {
-        setEntries(prev => [...prev, ...result.data]);
+        setCashEntries(prev => [...prev, ...result.data]);
         alert(`✅ ${result.message}\n\nImported ${result.successfulRows} entries successfully!\n\nFormat: Excel export format (same columns and order)`);
       },
       // Error callback
