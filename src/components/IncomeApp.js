@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { useData } from '../DataContext';
-import { excelFormatCSVImport } from '../utils/excelFormatCSVImport';
 
 function IncomeApp() {
-  const { incomeEntries, setIncomeEntries, customers, addIncomeEntry, deleteIncomeEntry, updateFirestoreDoc } = useData();
+  const { incomeEntries, setIncomeEntries, customers, addIncomeEntry, deleteIncomeEntry, updateFirestoreDoc, importCSVData, rulesEntries } = useData();
   const entries = incomeEntries;
   const setEntries = setIncomeEntries;
   
@@ -13,7 +12,7 @@ function IncomeApp() {
   const acNameOptions = ['Pre-', 'K G-', 'G _1', 'G _2', 'G _3', 'G _4', 'G _5', 'G _6', 'G _7', 'G _8', 'G _9', 'G_10', 'G_11', 'G_12'];
   const genderOptions = ['Male', 'Female'];
   const feesNameOptions = ['Registration', 'Services', 'Ferry'];
-  const methodOptions = ['Cash', 'Kpay', 'Bank', 'Others'];
+  const methodOptions = ['Cash', 'Kpay', 'Bank'];
 
   const [formData, setFormData] = useState({
     vrNo: '',
@@ -24,9 +23,12 @@ function IncomeApp() {
     acName: '',
     gender: '',
     name: '',
+    customerName: '',
     feesName: '',
+    autoFees: '',
     method: '',
     debit: '',
+    entryDate: new Date().toISOString().split('T')[0], // Auto Fees Entry Date (read-only)
   });
   const [editIndex, setEditIndex] = useState(null);
   const [showCustomerList, setShowCustomerList] = useState(false);
@@ -38,14 +40,16 @@ function IncomeApp() {
   const [filters, setFilters] = useState({
     vrNo: '',
     date: '',
-    fy: '',
+    fy: '', // Include FY in filters initial state
     acHead: '',
     acName: '',
     gender: '',
+    id: '',
     name: '',
     feesName: '',
-    method: '',
+    autoFees: '',
     debit: '',
+    method: '',
   });
 
   // Auto-generate FY based on April-March fiscal year
@@ -95,6 +99,17 @@ function IncomeApp() {
     return `ID-${String(nextNumber).padStart(4, '0')}`;
   };
 
+  // Helper: get fee amount from Rules based on A/C Head, A/C Name (A/C Class in Rules), and Fees Name
+  const getAutoFeeAmount = (acHead, acName, feesName) => {
+    const valid = ['Registration', 'Services'];
+    if (!acHead || !acName || !valid.includes(feesName)) return null;
+    const rule = (rulesEntries || []).find(r => String(r.acHead) === String(acHead) && String(r.acClass) === String(acName));
+    if (!rule) return null;
+    const key = feesName === 'Registration' ? 'registration' : 'services';
+    const val = Number(rule?.[key] ?? 0);
+    return isNaN(val) ? null : val;
+  };
+
   // Auto-generate VR No and FY when component loads
   useEffect(() => {
     if (!formData.vrNo && formData.date) {
@@ -112,10 +127,29 @@ function IncomeApp() {
       setFormData(prev => ({
         ...prev,
         vrNo: !formData.vrNo ? generateVRNo() : prev.vrNo,
-        fy: generateFY(formData.date)
+        fy: generateFY(formData.date),
+        entryDate: prev.entryDate || new Date().toISOString().split('T')[0]
       }));
     }
   }, [formData.date]);
+
+  // Recalculate Auto Fees and Amount when dependencies change
+  useEffect(() => {
+    const fees = formData.feesName;
+    const amount = getAutoFeeAmount(formData.acHead, formData.acName, fees);
+    if (amount !== null) {
+      setFormData(prev => ({
+        ...prev,
+        autoFees: String(amount),
+        debit: String(amount),
+      }));
+    } else if (fees && !['Registration', 'Services'].includes(fees)) {
+      // Non-applicable fees (e.g., Ferry): clear autoFees tag
+      if (formData.autoFees) {
+        setFormData(prev => ({ ...prev, autoFees: '' }));
+      }
+    }
+  }, [formData.acHead, formData.acName, formData.feesName, rulesEntries]);
 
   // Get filtered customers for name selection (filtered by FY, ID, A/C Head, A/C Name, Gender)
   const getFilteredCustomers = () => {
@@ -133,27 +167,19 @@ function IncomeApp() {
     });
   };
 
-  // CSV Import functionality
-  const importFromCSV = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    excelFormatCSVImport(
-      file,
-      'income',
-      // Success callback
-      (result) => {
-        setIncomeEntries(prev => [...prev, ...result.data]);
-        alert(`✅ ${result.message}\n\nImported ${result.successfulRows} entries successfully!\n\nFormat: Excel export format (same columns and order)`);
-      },
-      // Error callback
-      (error) => {
-        alert(`❌ CSV Import Failed:\n\n${error}\n\n💡 Solution:\n• CSV must match Excel export format exactly\n• Use the CSV Fix tool to download correct sample`);
-      }
-    );
-
-    // Reset file input
-    e.target.value = '';
+  // CSV Import functionality (centralized via DataContext)
+  const importFromCSV = async (e) => {
+    try {
+      const file = e.target.files[0];
+      if (!file) return;
+      const msg = await importCSVData(file, 'income');
+      alert(msg || 'Imported income entries successfully (existing data overwritten).');
+    } catch (err) {
+      console.error('Income CSV import failed:', err);
+      alert(`Income CSV import failed: ${err.message || err}`);
+    } finally {
+      if (e && e.target) e.target.value = '';
+    }
   };
 
   // Auto-fill name logic
@@ -202,6 +228,31 @@ function IncomeApp() {
       }
     }
 
+    // Auto Fees handling and auto amount
+    if (name === 'feesName') {
+      if (value === 'Registration' || value === 'Services') {
+        const amt = getAutoFeeAmount(newFormData.acHead, newFormData.acName, value);
+        newFormData.autoFees = amt !== null ? String(amt) : '';
+        if (amt !== null) newFormData.debit = String(amt);
+      } else {
+        // For non-applicable fees like Ferry
+        newFormData.autoFees = '';
+      }
+    }
+
+    // If A/C Head or A/C Name changes while a valid auto fee is selected, recompute amount
+    if ((name === 'acHead' || name === 'acName') && (newFormData.feesName === 'Registration' || newFormData.feesName === 'Services')) {
+      const amt = getAutoFeeAmount(
+        name === 'acHead' ? value : newFormData.acHead,
+        name === 'acName' ? value : newFormData.acName,
+        newFormData.feesName
+      );
+      if (amt !== null) {
+        newFormData.debit = String(amt);
+        newFormData.autoFees = String(amt);
+      }
+    }
+
     setFormData(newFormData);
   };
 
@@ -218,13 +269,18 @@ function IncomeApp() {
     setFormData({
       vrNo: newVRNo,
       date: new Date().toISOString().split('T')[0], // Reset to today's date
+      fy: generateFY(new Date().toISOString().split('T')[0]),
+      id: '',
       acHead: '',
       acName: '',
       gender: '',
       name: '',
+      customerName: '',
       feesName: '',
+      autoFees: '',
       method: '',
       debit: '',
+      entryDate: new Date().toISOString().split('T')[0],
     });
     setEditIndex(null);
   };
@@ -242,23 +298,33 @@ function IncomeApp() {
       });
     }
     
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport.map(entry => ({
-      'VR No': String(entry.vrNo || ''), // Convert to string to prevent scientific notation
-      'Date': formatDate(entry.date),
-      'FY': entry.fy || generateFY(entry.date),
-      'ID': entry.id || '',
-      'A/C Head': entry.acHead,
-      'A/C Name': entry.acName,
-      'Gender': entry.gender || '',
-      'Name': entry.name, // Full formatted name (e.g., "Pre- M Mg-မောင်သန့်စင်")
-      'Entry Name': entry.customerName || entry.rawName || '', // Raw customer name from customer list
-      'Fees Name': entry.feesName,
-      'Method': entry.method,
-      'Debit': entry.debit,
-      'Remark': '',
-      'Entry Date': entry.entryDate || entry.date
-    })));
-    
+    // Export exactly as requested headers, matching table data
+    const headers = [
+      'Date', 'FY', 'VR No', 'A/C Head', 'A/C Name', 'ID Name', 'Fees Name', 'Method', 'Amount', 'Auto Fees', 'Remark', 'Entry Date'
+    ];
+    const rows = dataToExport.map(entry => {
+      // Prefer explicit fields to reconstruct ID Name format; fallback to entry.name
+      const idName = (
+        (entry.id || entry.customId) && entry.customerName && entry.acName
+          ? `${entry.id || entry.customId} ${entry.customerName} [${entry.acName}]`
+          : (entry.name || '')
+      );
+      return [
+        formatDate(entry.date),
+        entry.fy || generateFY(entry.date),
+        String(entry.vrNo || ''),
+        entry.acHead || '',
+        entry.acName || '',
+        idName, // ID Name
+        entry.feesName || '',
+        entry.method || '',
+        entry.debit ?? '', // Amount
+        entry.autoFees ?? '', // Auto Fees
+        entry.remark || '', // Remark (empty if not used)
+        formatDate(entry.entryDate || entry.date)
+      ];
+    });
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Income Entries');
     
@@ -272,55 +338,76 @@ function IncomeApp() {
     
     // Validation
     if (!formData.vrNo || !formData.date || !formData.acHead || !formData.acName || 
-        !formData.name || !formData.feesName || !formData.method || !formData.debit) {
+        (!formData.method && editIndex === null) || !formData.name || !formData.feesName || !formData.debit) {
       alert('Please fill in all required fields');
+      return;
+    }
+    const allowedMethods = ['Cash','Kpay','Bank'];
+    if (formData.method && !allowedMethods.includes(String(formData.method))) {
+      alert('Invalid Method. Please select Cash, Kpay, or Bank.');
+      return;
+    }
+    const debitNum = Number(formData.debit);
+    if (!Number.isFinite(debitNum) || debitNum <= 0) {
+      alert('Amount must be a positive number.');
       return;
     }
 
     const entryData = {
       ...formData,
-      debit: parseFloat(formData.debit),
-      id: editIndex !== null ? entries[editIndex].id : (formData.id || generateNextCustomerId()),
+      fy: formData.fy || generateFY(formData.date),
+      vrNo: formData.vrNo || generateVRNo(),
+      debit: Number(formData.debit) || 0,
+      id: editIndex !== null ? entries[editIndex]?.id : (formData.id || generateNextCustomerId()),
       customerName: formData.customerName || '', // Raw customer name for Entry Name column
       entryDate: new Date().toISOString().split('T')[0], // Current date when entry is created
     };
+    console.log('Saving Income entry payload:', entryData, 'editIndex:', editIndex);
 
     try {
       if (editIndex !== null) {
         const existingEntry = entries[editIndex];
-        if (!existingEntry.id) {
-          alert('Cannot update: This entry was not properly saved to the database.');
-          return;
+        const idStr = String(existingEntry?.id || '');
+        const looksLikeLegacyId = !idStr || /^ID-\d{3,5}$/i.test(idStr);
+        if (!looksLikeLegacyId) {
+          // Normal update path
+          console.log('Updating income doc id:', idStr);
+          await updateFirestoreDoc('income', idStr, entryData);
+          const updatedEntries = [...entries];
+          updatedEntries[editIndex] = { ...entryData, id: idStr };
+          setEntries(updatedEntries);
+        } else {
+          // Legacy row without a real Firestore doc; create a new one and replace locally
+          console.warn('Legacy income row without real Firestore id detected. Creating new doc instead of update. Old id:', idStr);
+          const newCreated = await addIncomeEntry(entryData);
+          const updatedEntries = [...entries];
+          updatedEntries[editIndex] = newCreated;
+          setEntries(updatedEntries);
         }
-        
-        // Update in Firebase
-        await updateFirestoreDoc('income', existingEntry.id, entryData);
-        
-        // Update local state
-        const updatedEntries = [...entries];
-        updatedEntries[editIndex] = { ...entryData, id: existingEntry.id };
-        setEntries(updatedEntries);
       } else {
-        await addIncomeEntry(entryData);
+         console.log('Adding new income entry');
+         await addIncomeEntry(entryData);
       }
       clearForm();
       alert('Income entry saved successfully!');
     } catch (error) {
       console.error('Error saving income entry:', error);
-      alert('Error saving income entry. Please try again.');
+      alert(`Error saving income entry: ${error.message || error}. Please try again.`);
     }
   };
 
   const selectCustomer = (customer) => {
-    const customerName = `${customer.acName} ${customer.gender === 'Male' ? 'M' : 'F'} ${customer.name}`;
+    const idVal = customer.customId || customer.id;
+    // Display format: ID Name [A/C Name]
+    const display = `${idVal} ${customer.name} [${customer.acName}]`;
     setFormData({
       ...formData,
-      id: customer.customId || customer.id, // Auto-populate ID from Customer List
+      id: idVal, // Auto-populate ID from Customer List
       acHead: customer.acHead,
       acName: customer.acName,
       gender: customer.gender,
-      name: customerName, // Full formatted name (e.g., "Pre- M Mg-မောင်သန့်စင်")
-      customerName: customer.name, // Raw customer name from customer list (e.g., "Mg-မောင်သန့်စင်")
+      name: display, // e.g., "ID-0016 Mg Moe Thu [G_10]"
+      customerName: customer.name, // Raw customer name
     });
     setShowCustomerList(false);
   };
@@ -329,6 +416,7 @@ function IncomeApp() {
     const printWindow = window.open('', '_blank');
     const cleanedName = cleanName(entry.name);
     const monthYear = getMonthFromDate(entry.date);
+    // ... (rest of the code remains the same)
     
     const invoiceContent = `
       <!DOCTYPE html>
@@ -435,13 +523,25 @@ function IncomeApp() {
   };
 
   const handleEdit = (index) => {
-    setFormData(entries[index]);
-    setEditIndex(index);
+    const entry = filteredEntries[index];
+    if (!entry) return;
+    if (!entry.id) {
+      alert('Cannot edit: This entry has no database ID. Please re-import/save the row first.');
+      return;
+    }
+    setFormData(entry);
+    // Map to original entries index by id to ensure correct update
+    const origIdx = entries.findIndex(e => String(e.id) === String(entry.id));
+    if (origIdx === -1) {
+      alert('Original entry not found in current data. Please refresh and try again.');
+      return;
+    }
+    setEditIndex(origIdx);
   };
 
   const handleDelete = async (index) => {
     try {
-      const entry = entries[index];
+      const entry = filteredEntries[index];
       console.log('Income entry to delete:', entry);
       
       if (!entry.id) {
@@ -461,16 +561,41 @@ function IncomeApp() {
     return (
       (filters.vrNo === '' || (entry.vrNo || '').includes(filters.vrNo)) &&
       (filters.date === '' || (entry.date && entry.date.includes(filters.date))) &&
+      (filters.fy === '' || ((entry.fy || generateFY(entry.date) || '').includes(filters.fy))) &&
       (filters.acHead === '' || (entry.acHead || '').toLowerCase().includes(filters.acHead.toLowerCase())) &&
       (filters.acName === '' || (entry.acName || '').toLowerCase().includes(filters.acName.toLowerCase())) &&
       (filters.name === '' || (entry.name || '').toLowerCase().includes(filters.name.toLowerCase())) &&
       (filters.feesName === '' || (entry.feesName || '').toLowerCase().includes(filters.feesName.toLowerCase())) &&
+      (filters.autoFees === '' || (entry.autoFees || '').toLowerCase().includes(filters.autoFees.toLowerCase())) &&
       (filters.method === '' || (entry.method || '').toLowerCase().includes(filters.method.toLowerCase())) &&
       (filters.debit === '' || (entry.debit || '').toString().includes(filters.debit))
     );
   });
 
   const totalDebit = filteredEntries.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
+
+  // FY-dependent totals and counts (April–March FY)
+  const currentFYLabel = generateFY(new Date().toISOString().split('T')[0]);
+  const fyEntries = entries.filter(e => (e.fy || generateFY(e.date)) === currentFYLabel);
+  const fyTotalIncome = fyEntries.reduce((sum, e) => sum + (parseFloat(e.debit) || 0), 0);
+  const fyTotalCount = fyEntries.length;
+  // Amount totals by A/C Head based on current FY and current table filters
+  const norm = (s) => (s || '').toLowerCase();
+  const fyFilteredEntries = filteredEntries.filter(e => (e.fy || generateFY(e.date)) === currentFYLabel);
+  const amountByHead = (head) => fyFilteredEntries
+    .filter(e => norm(e.acHead) === norm(head))
+    .reduce((sum, e) => sum + (parseFloat(e.debit) || 0), 0);
+  const fyBoarderAmount = amountByHead('Boarder');
+  const fySemiBoarderAmount = amountByHead('Semi Boarder');
+  const fyDayAmount = amountByHead('Day');
+  // Method totals based on current FY and current table filters
+  const totalByMethod = (method) => fyFilteredEntries
+    .filter(e => norm(e.method) === norm(method))
+    .reduce((sum, e) => sum + (parseFloat(e.debit) || 0), 0);
+  const fyCashTotal = totalByMethod('Cash');
+  const fyKpayTotal = totalByMethod('Kpay');
+  const fyBankTotal = totalByMethod('Bank');
+  const fyMethodTotal = fyCashTotal + fyKpayTotal + fyBankTotal;
 
   // Helper function to get month name from date
   const getMonthFromDate = (dateStr) => {
@@ -490,280 +615,199 @@ function IncomeApp() {
 
   return (
     <div style={{ padding: '20px', backgroundColor: '#f8f9fa', minHeight: '100vh' }}>
-      {/* Header with Title and Total */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+      {/* Header with Title and FY totals */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <h2 style={{ color: '#27ae60', margin: 0 }}>Income & Invoice Book</h2>
-        <div style={{ backgroundColor: '#27ae60', color: 'white', padding: '8px 15px', borderRadius: '5px', fontWeight: 'bold', fontSize: '14px' }}>
-          Total Income: {formatNumber(totalDebit)} MMK | Total Entries: {filteredEntries.length}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ backgroundColor: '#2c3e50', color: 'white', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px' }}>
+            {currentFYLabel}
+          </div>
+          <div style={{ backgroundColor: '#34495e', color: 'white', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px' }}>
+            Boarder: {formatNumber(fyBoarderAmount)}
+          </div>
+          <div style={{ backgroundColor: '#8e44ad', color: 'white', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px' }}>
+            Semi Boarder: {formatNumber(fySemiBoarderAmount)}
+          </div>
+          <div style={{ backgroundColor: '#16a085', color: 'white', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px' }}>
+            Day: {formatNumber(fyDayAmount)}
+          </div>
+          <div style={{ backgroundColor: '#27ae60', color: 'white', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px' }}>
+            Total Income: {formatNumber(fyTotalIncome)}
+          </div>
+          <div style={{ backgroundColor: '#7f8c8d', color: 'white', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px' }}>
+            Total Entries: {fyTotalCount}
+          </div>
         </div>
       </div>
 
-      {/* Export Controls */}
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '15px', padding: '10px', backgroundColor: 'white', borderRadius: '5px' }}>
-        <label style={{ fontWeight: 'bold' }}>Start Date:</label>
-        <input
-          type="date"
-          value={exportStartDate}
-          onChange={(e) => setExportStartDate(e.target.value)}
-          style={{ padding: '5px', border: '1px solid #ddd', borderRadius: '3px' }}
-        />
-        <label style={{ fontWeight: 'bold' }}>End Date:</label>
-        <input
-          type="date"
-          value={exportEndDate}
-          onChange={(e) => setExportEndDate(e.target.value)}
-          style={{ padding: '5px', border: '1px solid #ddd', borderRadius: '3px' }}
-        />
-        <button
-          onClick={exportToExcel}
-          style={{ padding: '8px 15px', backgroundColor: '#27ae60', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '12px' }}
-        >
-          Export Excel
-        </button>
-        <label htmlFor="csvImport" style={{ padding: '8px 15px', backgroundColor: '#3498db', color: 'white', borderRadius: '3px', cursor: 'pointer', fontSize: '12px' }}>
-          Import CSV
-        </label>
-        <input
-          id="csvImport"
-          type="file"
-          accept=".csv"
-          onChange={importFromCSV}
-          style={{ display: 'none' }}
-        />
-      </div>
+      {/* Entry section controls moved into the form (second line) */}
 
-      {/* Entry Form */}
-      <form onSubmit={handleSubmit} style={{ backgroundColor: 'white', padding: '15px', borderRadius: '5px', marginBottom: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-        <h3 style={{ marginBottom: '15px', color: '#2c3e50', fontSize: '16px' }}>Entry Form</h3>
-        
-        {/* First Line: VR No, Date, FY, A/C Head, A/C Name, Gender */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px', marginBottom: '10px' }}>
+      {/* Entry Form - two lines as requested */}
+      <form onSubmit={handleSubmit} style={{ backgroundColor: 'white', padding: '12px', borderRadius: '8px', marginBottom: '16px', boxShadow: '0 2px 4px rgba(0,0,0,0.08)', overflowX: 'auto' }}>
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ margin: 0, fontSize: 14, color: '#2c3e50' }}>Entry Form</h3>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 'bold', fontSize: 12 }}>
+            <span>Cash: {formatNumber(fyCashTotal)}</span>
+            <span>Kpay: {formatNumber(fyKpayTotal)}</span>
+            <span>Bank: {formatNumber(fyBankTotal)}</span>
+            <span style={{ color: '#27ae60' }}>Total: {formatNumber(fyMethodTotal)}</span>
+          </div>
+        </div>
+        {/* First line: Date, FY, VR No, A/C Head, A/C Name, Gender, Fees Name, Auto Fees (window-fit) */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginBottom: 8 }}>
           <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>VR No:</label>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>Date</label>
+            <input type="date" name="date" value={formData.date} onChange={handleInputChange}
+              style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, background: '#ecf6ff', fontWeight: 'bold', fontSize: 12 }} required />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>FY</label>
+            <input type="text" name="fy" value={formData.fy} readOnly
+              style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #b0bec5', borderRadius: 6, background: '#f1f5f9', fontWeight: 'bold', fontSize: 12 }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>VR No</label>
+            <input type="text" name="vrNo" value={formData.vrNo} readOnly
+              style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #b0bec5', borderRadius: 6, background: '#f1f5f9', fontWeight: 'bold', fontSize: 12 }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>A/C Head</label>
+            <select name="acHead" value={formData.acHead} onChange={handleInputChange}
+              style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, background: '#ecf6ff', fontWeight: 'bold', fontSize: 12 }} required>
+              <option value="">Select</option>
+              {acHeadOptions.map(option => (<option key={option} value={option}>{option}</option>))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>A/C Name</label>
+            <select name="acName" value={formData.acName} onChange={handleInputChange}
+              style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, background: '#ecf6ff', fontWeight: 'bold', fontSize: 12 }} required>
+              <option value="">Select</option>
+              {acNameOptions.map(option => (<option key={option} value={option}>{option}</option>))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>Gender</label>
+            <select name="gender" value={formData.gender} onChange={handleInputChange}
+              style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, background: '#ecf6ff', fontWeight: 'bold', fontSize: 12 }} required>
+              <option value="">Select</option>
+              {genderOptions.map(option => (<option key={option} value={option}>{option}</option>))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>Fees Name</label>
+            <select name="feesName" value={formData.feesName} onChange={handleInputChange}
+              style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, background: '#ecf6ff', fontWeight: 'bold', fontSize: 12 }} required>
+              <option value="">Select</option>
+              {feesNameOptions.map(option => (<option key={option} value={option}>{option}</option>))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>Auto Fees</label>
             <input
               type="text"
-              name="vrNo"
-              value={formData.vrNo}
-              onChange={handleInputChange}
-              style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px' }}
-              placeholder="Auto-generated"
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>Date:</label>
-            <input
-              type="date"
-              name="date"
-              value={formData.date}
-              onChange={handleInputChange}
-              style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px' }}
-              required
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>FY:</label>
-            <input
-              type="text"
-              name="fy"
-              value={formData.fy}
+              name="autoFees"
+              value={formData.autoFees}
               readOnly
-              style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px', backgroundColor: '#f8f9fa' }}
-              placeholder="Auto-generated"
+              placeholder="Auto"
+              style={{ height: 40, width: '100%', padding: '0 10px', border: formData.autoFees ? '2px solid #f1c40f' : '2px solid #b0bec5', borderRadius: 6, background: formData.autoFees ? '#fffbea' : '#f1f5f9', fontWeight: 'bold', fontSize: 12, color: '#7a5b00' }}
             />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>A/C Head:</label>
-            <select
-              name="acHead"
-              value={formData.acHead}
-              onChange={handleInputChange}
-              style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px' }}
-              required
-            >
-              <option value="">Select A/C Head</option>
-              {acHeadOptions.map(option => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>A/C Name:</label>
-            <select
-              name="acName"
-              value={formData.acName}
-              onChange={handleInputChange}
-              style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px' }}
-              required
-            >
-              <option value="">Select A/C Name</option>
-              {acNameOptions.map(option => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>Gender:</label>
-            <select
-              name="gender"
-              value={formData.gender}
-              onChange={handleInputChange}
-              style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px' }}
-              required
-            >
-              <option value="">Select Gender</option>
-              {genderOptions.map(option => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
           </div>
         </div>
 
-        {/* Second Line: Fees Name, Method, Debit, Name */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr', gap: '10px', marginBottom: '15px' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>Fees Name:</label>
-            <select
-              name="feesName"
-              value={formData.feesName}
-              onChange={handleInputChange}
-              style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px' }}
-              required
-            >
-              <option value="">Select Fees Name</option>
-              {feesNameOptions.map(option => (
-                <option key={option} value={option}>{option}</option>
-              ))}
+        {/* Second line: Method, Amount, ID Name, + Add Entry, ✕ Clear, Start, End, Export Excel, Import CSV (sticky toolbar) */}
+        <div style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+          background: '#ffffff',
+          display: 'flex',
+          gap: 8,
+          alignItems: 'end',
+          flexWrap: 'nowrap',
+          overflowX: 'auto',
+          padding: '6px 0',
+          borderBottom: '1px solid #eee'
+        }}>
+          <div style={{ width: 120 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>Method</label>
+            <select name="method" value={formData.method} onChange={handleInputChange}
+              style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, background: '#ecf6ff', fontWeight: 'bold', fontSize: 12 }} required>
+              <option value="">Select</option>
+              {methodOptions.map(option => (<option key={option} value={option}>{option}</option>))}
             </select>
           </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>Method:</label>
-            <select
-              name="method"
-              value={formData.method}
-              onChange={handleInputChange}
-              style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px' }}
-              required
-            >
-              <option value="">Select Method</option>
-              {methodOptions.map(option => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+          <div style={{ width: 110 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>Amount</label>
+            <input type="number" name="debit" value={formData.debit} onChange={handleInputChange} placeholder="0.00" step="0.01"
+              style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, background: '#ecf6ff', fontWeight: 'bold', fontSize: 12 }} required />
           </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>Debit:</label>
-            <input
-              type="number"
-              name="debit"
-              value={formData.debit}
-              onChange={handleInputChange}
-              style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px' }}
-              placeholder="0.00"
-              step="0.01"
-              required
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '3px', fontWeight: 'bold', fontSize: '12px' }}>Name:</label>
-            <div style={{ display: 'flex', gap: '5px' }}>
-              <input
-                type="text"
-                name="name"
-                value={formData.name}
-                onChange={handleInputChange}
-                style={{ flex: 1, padding: '6px', border: '1px solid #ddd', borderRadius: '3px', fontSize: '12px' }}
-                placeholder="Auto-filled or select from list"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowCustomerList(true)}
-                style={{ padding: '6px 10px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}
-              >
-                Select
-              </button>
+          <div style={{ width: 480 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 'bold', fontSize: 12 }}>ID Name</label>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <input type="text" name="name" value={formData.name} onChange={handleInputChange} placeholder="Auto-filled or select"
+                style={{ height: 40, width: '100%', padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, background: '#ecf6ff', fontWeight: 'bold', fontSize: 12 }} required />
+              <button type="button" onClick={() => setShowCustomerList(true)}
+                style={{ height: 40, padding: '0 8px', backgroundColor: '#3498db', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', fontSize: 12, cursor: 'pointer' }}>Select</button>
             </div>
           </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button
-            type="submit"
-            style={{ padding: '10px 20px', backgroundColor: '#27ae60', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer' }}
-          >
-            {editIndex !== null ? 'Update' : 'Add'}
+          <button type="submit"
+            style={{ height: 40, padding: '0 14px', backgroundColor: '#27ae60', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', fontSize: 12, cursor: 'pointer' }}>
+            {editIndex !== null ? 'Update' : '+ Add Entry'}
           </button>
-          <button
-            type="button"
-            onClick={clearForm}
-            style={{ padding: '10px 20px', backgroundColor: '#95a5a6', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer' }}
-          >
-            Clear
+          <button type="button" onClick={clearForm}
+            style={{ height: 40, padding: '0 14px', backgroundColor: '#7f8c8d', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', fontSize: 12, cursor: 'pointer' }}>
+            ✕ Clear
           </button>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
+            <label style={{ fontWeight: 'bold', fontSize: '12px' }}>Start:</label>
+            <input type="date" value={exportStartDate} onChange={(e) => setExportStartDate(e.target.value)}
+              style={{ height: 40, padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, background: '#ecf6ff' }} />
+            <label style={{ fontWeight: 'bold', fontSize: '12px' }}>End:</label>
+            <input type="date" value={exportEndDate} onChange={(e) => setExportEndDate(e.target.value)}
+              style={{ height: 40, padding: '0 10px', border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, background: '#ecf6ff' }} />
+            <button type="button" onClick={exportToExcel}
+              style={{ height: 40, padding: '0 14px', backgroundColor: '#27ae60', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}>
+              Export Excel
+            </button>
+            <label htmlFor="csvImport" style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 14px', backgroundColor: '#3498db', color: 'white', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}>
+              Import CSV
+            </label>
+            <input id="csvImport" type="file" accept=".xlsx,.csv" onChange={importFromCSV} style={{ display: 'none' }} />
+          </div>
         </div>
       </form>
 
       {/* Table View - Below Entry Form */}
-      <div style={{ overflowX: 'auto', marginBottom: '15px' }}>
+      <div style={{ overflow: 'auto', maxHeight: '65vh', marginBottom: '15px' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-          <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: 'white' }}>
             <tr style={{ backgroundColor: '#27ae60', color: 'white' }}>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '80px' }}>VR No</th>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '70px' }}>Date</th>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '50px' }}>FY</th>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '80px' }}>A/C Head</th>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '80px' }}>A/C Name</th>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '200px' }}>Name</th>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '80px' }}>Fees Name</th>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '80px' }}>Method</th>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '80px' }}>Debit</th>
-              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '120px' }}>Actions</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '80px' }}>Date</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '60px' }}>FY</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '90px' }}>VR No</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '100px' }}>A/C Head</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '100px' }}>A/C Name</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '220px' }}>ID Name</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '110px' }}>Fees Name</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '90px' }}>Method</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '90px' }}>Amount</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '110px' }}>Auto Fees</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', width: '140px' }}>Actions</th>
             </tr>
             <tr style={{ backgroundColor: '#27ae60', color: 'white' }}>
               <th style={{ padding: '5px', border: '1px solid #ddd' }}>
-                <input
-                  type="text"
-                  name="vrNo"
-                  placeholder="Filter VR No"
-                  value={filters.vrNo}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}
-                />
+                <input type="date" name="date" value={filters.date} onChange={handleFilterChange} style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }} />
               </th>
               <th style={{ padding: '5px', border: '1px solid #ddd' }}>
-                <input
-                  type="date"
-                  name="date"
-                  value={filters.date}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}
-                />
+                <input type="text" name="fy" placeholder="FY" value={filters.fy} onChange={handleFilterChange} style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }} />
               </th>
               <th style={{ padding: '5px', border: '1px solid #ddd' }}>
-                <input
-                  type="text"
-                  name="fy"
-                  placeholder="Filter FY"
-                  value={filters.fy}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}
-                />
+                <input type="text" name="vrNo" placeholder="VR No" value={filters.vrNo} onChange={handleFilterChange} style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }} />
               </th>
               <th style={{ padding: '5px', border: '1px solid #ddd' }}>
-                <select
-                  name="acHead"
-                  value={filters.acHead}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}
-                >
+                <select name="acHead" value={filters.acHead} onChange={handleFilterChange} style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}>
                   <option value="">All</option>
                   {acHeadOptions.map(option => (
                     <option key={option} value={option}>{option}</option>
@@ -771,12 +815,7 @@ function IncomeApp() {
                 </select>
               </th>
               <th style={{ padding: '5px', border: '1px solid #ddd' }}>
-                <select
-                  name="acName"
-                  value={filters.acName}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}
-                >
+                <select name="acName" value={filters.acName} onChange={handleFilterChange} style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}>
                   <option value="">All</option>
                   {acNameOptions.map(option => (
                     <option key={option} value={option}>{option}</option>
@@ -784,22 +823,10 @@ function IncomeApp() {
                 </select>
               </th>
               <th style={{ padding: '5px', border: '1px solid #ddd' }}>
-                <input
-                  type="text"
-                  name="name"
-                  placeholder="Filter Name"
-                  value={filters.name}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}
-                />
+                <input type="text" name="name" placeholder="ID Name" value={filters.name} onChange={handleFilterChange} style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }} />
               </th>
               <th style={{ padding: '5px', border: '1px solid #ddd' }}>
-                <select
-                  name="feesName"
-                  value={filters.feesName}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}
-                >
+                <select name="feesName" value={filters.feesName} onChange={handleFilterChange} style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}>
                   <option value="">All</option>
                   {feesNameOptions.map(option => (
                     <option key={option} value={option}>{option}</option>
@@ -807,12 +834,7 @@ function IncomeApp() {
                 </select>
               </th>
               <th style={{ padding: '5px', border: '1px solid #ddd' }}>
-                <select
-                  name="method"
-                  value={filters.method}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}
-                >
+                <select name="method" value={filters.method} onChange={handleFilterChange} style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}>
                   <option value="">All</option>
                   {methodOptions.map(option => (
                     <option key={option} value={option}>{option}</option>
@@ -820,27 +842,15 @@ function IncomeApp() {
                 </select>
               </th>
               <th style={{ padding: '5px', border: '1px solid #ddd' }}>
-                <input
-                  type="text"
-                  name="debit"
-                  placeholder="Filter Debit"
-                  value={filters.debit}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }}
-                />
+                <input type="text" name="debit" placeholder="Amount" value={filters.debit} onChange={handleFilterChange} style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }} />
+              </th>
+              <th style={{ padding: '5px', border: '1px solid #ddd' }}>
+                <input type="number" name="autoFees" value={filters.autoFees} onChange={handleFilterChange} placeholder="AutoAmt" style={{ width: '100%', padding: '4px', border: 'none', fontSize: '11px' }} />
               </th>
               <th style={{ padding: '5px', border: '1px solid #ddd', textAlign: 'center' }}>
                 <button
-                  onClick={() => setFilters({ vrNo: '', date: '', fy: '', acHead: '', acName: '', gender: '', name: '', feesName: '', method: '', debit: '' })}
-                  style={{
-                    padding: '4px 8px',
-                    backgroundColor: '#e74c3c',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '2px',
-                    cursor: 'pointer',
-                    fontSize: '10px'
-                  }}
+                  onClick={() => setFilters({ vrNo: '', date: '', fy: '', acHead: '', acName: '', name: '', feesName: '', autoFees: '', method: '', debit: '' })}
+                  style={{ padding: '4px 8px', backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '10px' }}
                 >
                   Clear
                 </button>
@@ -850,20 +860,21 @@ function IncomeApp() {
           <tbody>
             {filteredEntries.length === 0 ? (
               <tr>
-                <td colSpan="10" style={{ padding: '10px', textAlign: 'center' }}>No entries found.</td>
+                <td colSpan="11" style={{ padding: '10px', textAlign: 'center' }}>No entries found.</td>
               </tr>
             ) : (
               filteredEntries.map((entry, index) => (
                 <tr key={index} style={{ backgroundColor: index % 2 === 0 ? '#f8f9fa' : 'white' }}>
-                  <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px' }}>{entry.vrNo}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px' }}>{formatDate(entry.date)}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px' }}>{entry.fy || generateFY(entry.date)}</td>
+                  <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px' }}>{entry.vrNo}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px' }}>{entry.acHead}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px' }}>{entry.acName}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px' }}>{entry.name}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px' }}>{entry.feesName}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px' }}>{entry.method}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', textAlign: 'right', color: '#27ae60', fontSize: '11px', fontWeight: 'bold' }}>{formatNumber(entry.debit)}</td>
+                  <td style={{ padding: '5px', border: '1px solid #ddd', textAlign: 'right', fontSize: '11px' }}>{formatNumber(entry.autoFees)}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '11px', textAlign: 'center' }}>
                     <button onClick={() => handleEdit(index)} style={{ marginRight: '3px', padding: '3px 6px', backgroundColor: '#f39c12', color: 'white', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}>
                       Edit
@@ -893,7 +904,7 @@ function IncomeApp() {
                   <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', width: '60px' }}>FY</th>
                   <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', width: '50px' }}>ID</th>
                   <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', width: '90px' }}>A/C Name</th>
-                  <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', width: '80px' }}>A/C Class</th>
+                  <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', width: '80px' }}>A/C Head</th>
                   <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', width: '70px' }}>Gender</th>
                   <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', width: '200px' }}>Name</th>
                   <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', width: '70px' }}>Action</th>
@@ -907,7 +918,9 @@ function IncomeApp() {
                     <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '10px' }}>{customer.acName}</td>
                     <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '10px' }}>{customer.acHead}</td>
                     <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '10px' }}>{customer.gender}</td>
-                    <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '10px' }}>{(customer.displayName || customer.name)} {customer.customId || customer.id}</td>
+                    <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '10px' }}>
+                      {`${customer.customId || customer.id} ${customer.name} [${customer.acName}]`}
+                    </td>
                     <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '10px' }}>
                       <button
                         onClick={() => selectCustomer(customer)}

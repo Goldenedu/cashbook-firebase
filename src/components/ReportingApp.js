@@ -415,6 +415,7 @@ function ReportingApp() {
   const exportReport = () => {
     const workbook = XLSX.utils.book_new();
     const filteredData = getFilteredData();
+    const totals = calculateTotals(filteredData);
     
     // Get book filter name for report title
     const bookFilterNames = {
@@ -479,14 +480,15 @@ function ReportingApp() {
     );
     
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+    // Rename to 'Summary Data' per requirements
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary Data');
 
-    // 2. Combined Data Sheet - Data from filtered modules
+    // 2. Combined Data Sheet - Always include ALL books' data
     const combinedData = [];
     
-    // Add entries from filtered data
-    if (filteredData.bank) {
-      filteredData.bank.forEach(entry => {
+    // Add entries from ALL modules regardless of current filter
+    if (allData.bank) {
+      allData.bank.forEach(entry => {
         combinedData.push({
           'Book Name': 'Bank Book',
           'Date': entry.date || '',
@@ -494,7 +496,6 @@ function ReportingApp() {
           'VR No': entry.vrNo || '',
           'A/C Head': entry.acHead || 'Bank',
           'A/C Name': entry.acName || '',
-          'Entry Name': entry.name || entry.customerName || '',
           'Description': entry.description || '',
           'Fees Name': entry.feesName || '',
           'Method': entry.method || '',
@@ -510,8 +511,8 @@ function ReportingApp() {
     }
     
     // Add Cash entries
-    if (filteredData.cash) {
-      filteredData.cash.forEach(entry => {
+    if (allData.cash) {
+      allData.cash.forEach(entry => {
         combinedData.push({
           'Book Name': 'Cash Book',
           'Date': entry.date || '',
@@ -519,7 +520,6 @@ function ReportingApp() {
           'VR No': entry.vrNo || '',
           'A/C Head': entry.acHead || 'Cash',
           'A/C Name': entry.acName || '',
-          'Entry Name': entry.name || entry.customerName || '',
           'Description': entry.description || '',
           'Fees Name': entry.feesName || '',
           'Method': entry.method || '',
@@ -535,8 +535,8 @@ function ReportingApp() {
     }
     
     // Add Income entries
-    if (filteredData.income) {
-      filteredData.income.forEach(entry => {
+    if (allData.income) {
+      allData.income.forEach(entry => {
         // Generate FY in correct format for Income entries
         const generateFY = (dateStr) => {
           if (!dateStr) return '';
@@ -556,6 +556,8 @@ function ReportingApp() {
           return `FY ${fyStart.toString().slice(-2)}-${fyEnd.toString().slice(-2)}`;
         };
 
+        const idVal = entry.customId || '';
+        const entryName = entry.name || entry.customerName || '';
         combinedData.push({
           'Book Name': 'Income & Invoice Book',
           'Date': entry.date || '',
@@ -563,7 +565,7 @@ function ReportingApp() {
           'VR No': entry.vrNo || '',
           'A/C Head': entry.acHead || 'Income',
           'A/C Name': entry.acName || '',
-          'Entry Name': entry.name || entry.customerName || '',
+          'ID Name': `${(idVal || '').trim()}${idVal ? ' ' : ''}${(entryName || '').trim()}${entry.acName ? ` [${entry.acName}]` : ''}`.trim(),
           'Description': entry.description || '',
           'Fees Name': entry.feesName || '',
           'Method': entry.method || '',
@@ -579,8 +581,8 @@ function ReportingApp() {
     }
     
     // Add Office entries
-    if (filteredData.office) {
-      filteredData.office.forEach(entry => {
+    if (allData.office) {
+      allData.office.forEach(entry => {
         combinedData.push({
           'Book Name': 'Office Exp Book',
           'Date': entry.date || '',
@@ -588,7 +590,6 @@ function ReportingApp() {
           'VR No': entry.vrNo || '',
           'A/C Head': entry.acHead || 'Office Expense',
           'A/C Name': entry.acName || '',
-          'Entry Name': entry.name || entry.customerName || '',
           'Description': entry.description || '',
           'Fees Name': entry.feesName || '',
           'Method': entry.method || '',
@@ -604,8 +605,8 @@ function ReportingApp() {
     }
     
     // Add Kitchen entries
-    if (filteredData.kitchen) {
-      filteredData.kitchen.forEach(entry => {
+    if (allData.kitchen) {
+      allData.kitchen.forEach(entry => {
         combinedData.push({
           'Book Name': 'Kitchen Exp Book',
           'Date': entry.date || '',
@@ -613,7 +614,6 @@ function ReportingApp() {
           'VR No': entry.vrNo || '',
           'A/C Head': entry.acHead || 'Kitchen Expense',
           'A/C Name': entry.acName || '',
-          'Entry Name': entry.name || entry.customerName || '',
           'Description': entry.description || '',
           'Fees Name': entry.feesName || '',
           'Method': entry.method || '',
@@ -629,8 +629,8 @@ function ReportingApp() {
     }
     
     // Add Salary entries
-    if (filteredData.salary) {
-      filteredData.salary.forEach(entry => {
+    if (allData.salary) {
+      allData.salary.forEach(entry => {
         combinedData.push({
           'Book Name': 'Salary Exp Book',
           'Date': entry.date || '',
@@ -638,7 +638,6 @@ function ReportingApp() {
           'VR No': entry.vrNo || '',
           'A/C Head': entry.acHead || 'Salary Expense',
           'A/C Name': entry.acName || '',
-          'Entry Name': entry.name || entry.customerName || '',
           'Description': entry.description || '',
           'Fees Name': entry.feesName || '',
           'Method': entry.method || '',
@@ -653,17 +652,86 @@ function ReportingApp() {
       });
     }
     
-    // Sort combined data by date
-    combinedData.sort((a, b) => new Date(a.Date) - new Date(b.Date));
+    // De-duplicate combined data (guard against accidental double additions)
+    const uniqueMap = new Map();
+    combinedData.forEach(row => {
+      const key = [
+        row['Book Name'] || '',
+        row['Date'] || '',
+        row['VR No'] || '',
+        row['A/C Head'] || '',
+        row['A/C Name'] || '',
+        row['Debit'] || 0,
+        row['Credit'] || 0,
+        row['ID'] || ''
+      ].join('|');
+      if (!uniqueMap.has(key)) uniqueMap.set(key, row);
+    });
+    const uniqueCombined = Array.from(uniqueMap.values());
+
+    // Sort combined data book-by-book, then by date
+    const bookOrder = {
+      'Bank Book': 1,
+      'Cash Book': 2,
+      'Income & Invoice Book': 3,
+      'Office Exp Book': 4,
+      'Kitchen Exp Book': 5,
+      'Salary Exp Book': 6
+    };
+    uniqueCombined.sort((a, b) => {
+      const oa = bookOrder[a['Book Name']] || 99;
+      const ob = bookOrder[b['Book Name']] || 99;
+      if (oa !== ob) return oa - ob;
+      const da = new Date(a.Date || '1970-01-01');
+      const db = new Date(b.Date || '1970-01-01');
+      if (da - db !== 0) return da - db;
+      // tiebreaker by VR No numeric/string
+      const va = (a['VR No'] || '').toString();
+      const vb = (b['VR No'] || '').toString();
+      return va.localeCompare(vb);
+    });
     
-    const sumDataSheet = XLSX.utils.json_to_sheet(combinedData);
+    // Build Sum Data with fixed header order
+    const sumHeaders = [
+      'Book Name','Date','FY','VR No','A/C Head','A/C Name','ID Name','Description','Fees Name','Method','Debit','Credit','Transfer','ID','Gender','Entry Date','Remark'
+    ];
+    const sumDataSheet = XLSX.utils.aoa_to_sheet([sumHeaders]);
+    // Ensure each row has explicit keys (missing keys become blank)
+    const normalizedRows = uniqueCombined.map(r => ({
+      'Book Name': r['Book Name'] || '',
+      'Date': r['Date'] || '',
+      'FY': r['FY'] || '',
+      'VR No': r['VR No'] || '',
+      'A/C Head': r['A/C Head'] || '',
+      'A/C Name': r['A/C Name'] || '',
+      'ID Name': r['ID Name'] || '', // populated for Income only
+      'Description': r['Description'] || '',
+      'Fees Name': r['Fees Name'] || '',
+      'Method': r['Method'] || '',
+      'Debit': r['Debit'] || 0,
+      'Credit': r['Credit'] || 0,
+      'Transfer': r['Transfer'] || '',
+      'ID': r['ID'] || '',
+      'Gender': r['Gender'] || '',
+      'Entry Date': r['Entry Date'] || '',
+      'Remark': r['Remark'] || ''
+    }));
+    XLSX.utils.sheet_add_json(sumDataSheet, normalizedRows, { skipHeader: true, origin: 'A2' });
     XLSX.utils.book_append_sheet(workbook, sumDataSheet, 'Sum Data');
 
-    // 3. Individual module sheets based on filtered data
-    if (bookFilter === 'all') {
-      // For "All Books", create individual sheets for each book type
-      if (filteredData.bank && filteredData.bank.length > 0) {
-        const bankFormattedData = filteredData.bank.map(entry => ({
+    // 3. Individual module sheets - Always create sheets for all books
+    // Helper to add a title row then append JSON rows starting at A2
+    const addTitledSheet = (bookName, rows, sheetName) => {
+      if (!rows || rows.length === 0) return;
+      const titleRow = [[`CashBook Report - ${bookName}`]];
+      const sheet = XLSX.utils.aoa_to_sheet(titleRow);
+      XLSX.utils.sheet_add_json(sheet, rows, { origin: 'A2' });
+      XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
+    };
+
+    // Create individual sheets using ALL data
+    if (allData.bank && allData.bank.length > 0) {
+      const bankFormattedData = allData.bank.map(entry => ({
           'Date': entry.date || '',
           'FY': entry.fy || '',
           'VR No': entry.vrNo || '',
@@ -681,12 +749,11 @@ function ReportingApp() {
           'Entry Date': entry.entryDate || entry.timestamp || entry.date || new Date().toISOString().split('T')[0],
           'Remark': entry.remark || ''
         }));
-        const bankSheet = XLSX.utils.json_to_sheet(bankFormattedData);
-        XLSX.utils.book_append_sheet(workbook, bankSheet, 'Bank');
+      addTitledSheet('Bank Book', bankFormattedData, 'Bank');
       }
       
-      if (filteredData.cash && filteredData.cash.length > 0) {
-        const cashFormattedData = filteredData.cash.map(entry => ({
+    if (allData.cash && allData.cash.length > 0) {
+      const cashFormattedData = allData.cash.map(entry => ({
           'Date': entry.date || '',
           'FY': entry.fy || '',
           'VR No': entry.vrNo || '',
@@ -704,11 +771,10 @@ function ReportingApp() {
           'Entry Date': entry.entryDate || entry.timestamp || entry.date || new Date().toISOString().split('T')[0],
           'Remark': entry.remark || ''
         }));
-        const cashSheet = XLSX.utils.json_to_sheet(cashFormattedData);
-        XLSX.utils.book_append_sheet(workbook, cashSheet, 'Cash');
+      addTitledSheet('Cash Book', cashFormattedData, 'Cash');
       }
       
-      if (filteredData.income && filteredData.income.length > 0) {
+    if (allData.income && allData.income.length > 0) {
         const generateFY = (dateStr) => {
           if (!dateStr) return '';
           const date = new Date(dateStr);
@@ -725,7 +791,7 @@ function ReportingApp() {
           return `FY ${fyStart.toString().slice(-2)}-${fyEnd.toString().slice(-2)}`;
         };
         
-        const incomeFormattedData = filteredData.income.map(entry => ({
+        const incomeFormattedData = allData.income.map(entry => ({
           'Date': entry.date || '',
           'FY': generateFY(entry.date) || entry.fy || '',
           'VR No': entry.vrNo || '',
@@ -743,12 +809,11 @@ function ReportingApp() {
           'Entry Date': entry.entryDate || entry.timestamp || entry.date || new Date().toISOString().split('T')[0],
           'Remark': entry.remark || ''
         }));
-        const incomeSheet = XLSX.utils.json_to_sheet(incomeFormattedData);
-        XLSX.utils.book_append_sheet(workbook, incomeSheet, 'Income');
+      addTitledSheet('Income & Invoice Book', incomeFormattedData, 'Income');
       }
       
-      if (filteredData.office && filteredData.office.length > 0) {
-        const officeFormattedData = filteredData.office.map(entry => ({
+    if (allData.office && allData.office.length > 0) {
+      const officeFormattedData = allData.office.map(entry => ({
           'Date': entry.date || '',
           'FY': entry.fy || '',
           'VR No': entry.vrNo || '',
@@ -766,12 +831,11 @@ function ReportingApp() {
           'Entry Date': entry.entryDate || entry.timestamp || entry.date || new Date().toISOString().split('T')[0],
           'Remark': entry.remark || ''
         }));
-        const officeSheet = XLSX.utils.json_to_sheet(officeFormattedData);
-        XLSX.utils.book_append_sheet(workbook, officeSheet, 'Office');
+      addTitledSheet('Office Book', officeFormattedData, 'Office');
       }
       
-      if (filteredData.kitchen && filteredData.kitchen.length > 0) {
-        const kitchenFormattedData = filteredData.kitchen.map(entry => ({
+    if (allData.kitchen && allData.kitchen.length > 0) {
+      const kitchenFormattedData = allData.kitchen.map(entry => ({
           'Date': entry.date || '',
           'FY': entry.fy || '',
           'VR No': entry.vrNo || '',
@@ -789,12 +853,11 @@ function ReportingApp() {
           'Entry Date': entry.entryDate || entry.timestamp || entry.date || new Date().toISOString().split('T')[0],
           'Remark': entry.remark || ''
         }));
-        const kitchenSheet = XLSX.utils.json_to_sheet(kitchenFormattedData);
-        XLSX.utils.book_append_sheet(workbook, kitchenSheet, 'Kitchen');
+      addTitledSheet('Kitchen Book', kitchenFormattedData, 'Kitchen');
       }
-      
-      if (filteredData.salary && filteredData.salary.length > 0) {
-        const salaryFormattedData = filteredData.salary.map(entry => ({
+
+    if (allData.salary && allData.salary.length > 0) {
+      const salaryFormattedData = allData.salary.map(entry => ({
           'Date': entry.date || '',
           'FY': entry.fy || '',
           'VR No': entry.vrNo || '',
@@ -812,29 +875,59 @@ function ReportingApp() {
           'Entry Date': entry.entryDate || entry.timestamp || entry.date || new Date().toISOString().split('T')[0],
           'Remark': entry.remark || ''
         }));
-        const salarySheet = XLSX.utils.json_to_sheet(salaryFormattedData);
-        XLSX.utils.book_append_sheet(workbook, salarySheet, 'Salary');
-      }
-    } else {
-      // For individual book selection, create only the selected book sheet
-      Object.keys(filteredData).forEach(bookType => {
-        if (filteredData[bookType] && filteredData[bookType].length > 0) {
-          const sheet = XLSX.utils.json_to_sheet(filteredData[bookType]);
-          const sheetName = bookType.charAt(0).toUpperCase() + bookType.slice(1);
-          XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
-        }
-      });
+      addTitledSheet('Salary Book', salaryFormattedData, 'Salary');
     }
     
-    // Add additional sheets for invoices and customers if available
-    if (filteredData.invoices && filteredData.invoices.length > 0) {
-      const invoicesSheet = XLSX.utils.json_to_sheet(filteredData.invoices);
-      XLSX.utils.book_append_sheet(workbook, invoicesSheet, 'Invoices');
-    }
-    
+    // Add customer sheet only (no invoices sheet needed), match CustomerApp export format
     if (allData.customers && allData.customers.length > 0) {
-      const customersSheet = XLSX.utils.json_to_sheet(allData.customers);
-      XLSX.utils.book_append_sheet(workbook, customersSheet, 'Customers');
+      const formatDate = (dateString) => {
+        if (!dateString) return '';
+        if (typeof dateString !== 'string') {
+          const d = new Date(dateString);
+          if (isNaN(d.getTime())) return '';
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          return `${dd}-${mm}-${yyyy}`;
+        }
+        const s = dateString.includes('/') ? dateString.replaceAll('/', '-') : dateString;
+        const parts = s.split('-');
+        if (parts.length !== 3) return dateString;
+        if (parts[0].length === 4) {
+          const [yyyy, mm, dd] = parts;
+          return `${dd}-${mm}-${yyyy}`;
+        } else {
+          const [dd, mm, yyyy] = parts;
+          return `${dd}-${mm}-${yyyy}`;
+        }
+      };
+      const formatFy = (dateString) => {
+        if (!dateString) return '';
+        const s = typeof dateString === 'string' && dateString.includes('/') ? dateString.replaceAll('/', '-') : dateString;
+        const d = new Date(s);
+        if (isNaN(d.getTime())) return '';
+        const y = d.getFullYear();
+        const m = d.getMonth() + 1;
+        const fyStart = m >= 4 ? y : y - 1;
+        const fyEnd = m >= 4 ? y + 1 : y;
+        return `FY ${String(fyStart).slice(-2)}-${String(fyEnd).slice(-2)}`;
+      };
+      const headers = [
+        'Date','FY','ID','A/C Head','A/C Name','Gender','Name','Entry Date','Remark'
+      ];
+      const rows = allData.customers.map(c => [
+        formatDate(c.date),
+        formatFy(c.date),
+        c.customId || '',
+        c.acHead || '',
+        c.acName || '',
+        c.gender || '',
+        `${c.customId || ''} ${c.name || ''} [${c.acName || ''}]`,
+        formatDate(c.entryDate || c.date),
+        c.remark || ''
+      ]);
+      const customersSheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      XLSX.utils.book_append_sheet(workbook, customersSheet, 'customer');
     }
 
     // Generate filename based on filter
@@ -1346,12 +1439,6 @@ function ReportingApp() {
               style={{ padding: '6px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '13px', minWidth: '140px' }}
             >
               <option value="all">All Books</option>
-              <option value="cash">Cash Book</option>
-              <option value="income">Income & Invoice Book</option>
-              <option value="office">Office Exp Book</option>
-              <option value="salary">Salary Exp Book</option>
-              <option value="kitchen">Kitchen Book</option>
-              <option value="bank">Bank Book</option>
             </select>
           </div>
           

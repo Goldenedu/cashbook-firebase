@@ -1,23 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { useData } from '../DataContext';
-import { excelFormatCSVImport } from '../utils/excelFormatCSVImport';
 
 function CashApp() {
-  const { cashEntries, setCashEntries, addCashEntry, deleteCashEntry, updateFirestoreDoc } = useData();
+  const { cashEntries, setCashEntries, addCashEntry, deleteCashEntry, updateFirestoreDoc, bulkReplaceCash } = useData();
   const entries = cashEntries;
   const setEntries = setCashEntries;
 
   const [formData, setFormData] = useState({
-    date: '',
-    acHead: 'Cash',
+    date: new Date().toISOString().split('T')[0], // Auto set today's date
+    fy: '',
+    vrNo: '',
+    acHead: 'Cash', // Auto Cash
     acName: '',
     description: '',
     method: '',
-    debit: '',
-    credit: '',
+    amount: '',
     transfer: '',
-    fy: ''
+    entryDate: new Date().toLocaleDateString('en-GB') // Auto entry date
   });
 
   const [editIndex, setEditIndex] = useState(null);
@@ -25,13 +25,14 @@ function CashApp() {
   const [filters, setFilters] = useState({
     date: '',
     fy: '',
+    vrNo: '',
     acHead: '',
     acName: '',
     description: '',
     method: '',
-    debit: '',
-    credit: '',
-    transfer: ''
+    amount: '',
+    transfer: '',
+    entryDate: ''
   });
 
   const [exportRange, setExportRange] = useState({
@@ -54,64 +55,135 @@ function CashApp() {
     return `${day}-${month}-${year}`;
   };
 
+  // Auto-generate Financial Year (April to March)
   const calculateFY = (dateStr) => {
     if (!dateStr) return '';
-    
+
     let d;
-    // Handle DD-MM-YYYY format from CSV
-    if (dateStr.includes('-') && dateStr.split('-').length === 3) {
-      const parts = dateStr.split('-');
-      if (parts[0].length === 2) {
-        // DD-MM-YYYY format
-        d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+    // Support both 'YYYY-MM-DD' and 'DD/MM/YYYY'
+    if (typeof dateStr === 'string' && dateStr.includes('/')) {
+      const parts = dateStr.split('/'); // DD/MM/YYYY
+      if (parts.length === 3) {
+        const [dd, mm, yyyy] = parts;
+        const day = parseInt(dd, 10);
+        const month = parseInt(mm, 10) - 1; // 0-indexed
+        const year = parseInt(yyyy, 10);
+        d = new Date(year, month, day);
+      }
+    } else if (typeof dateStr === 'string' && dateStr.includes('-')) {
+      // Handle DD-MM-YYYY and YYYY-MM-DD
+      if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) {
+        const [dd, mm, yyyy] = dateStr.split('-');
+        d = new Date(parseInt(yyyy,10), parseInt(mm,10)-1, parseInt(dd,10));
       } else {
-        // YYYY-MM-DD format
+        // ISO string like 'YYYY-MM-DD' parses reliably
         d = new Date(dateStr);
       }
+    } else if (dateStr instanceof Date) {
+      d = dateStr;
     } else {
       d = new Date(dateStr);
     }
-    
-    if (isNaN(d)) {
-      console.log(`Invalid date: ${dateStr}`);
-      return '';
-    }
-    
+
+    if (!(d instanceof Date) || isNaN(d)) return '';
+
     const year = d.getFullYear();
-    const month = d.getMonth() + 1;
+    const month = d.getMonth() + 1; // 0-indexed -> 1-12
+
+    // Financial year starts from April
     let fyStart = month >= 4 ? year : year - 1;
     let fyEnd = fyStart + 1;
-    const fy = `${fyStart.toString().slice(-2)}-${fyEnd.toString().slice(-2)}`;
-    console.log(`Date: ${dateStr} -> FY: ${fy}`);
-    return fy;
+
+    // Format: FY 25-26 (for 2025-2026)
+    return `FY ${fyStart.toString().slice(-2)}-${fyEnd.toString().slice(-2)}`;
+  };
+
+  // Auto-generate VR No (format: CB-DDMMYY-001)
+  const generateVRNo = (dateStr) => {
+    if (!dateStr) return '';
+
+    let d;
+    if (typeof dateStr === 'string' && dateStr.includes('/')) {
+      // DD/MM/YYYY
+      const parts = dateStr.split('/');
+      if (parts.length === 3) {
+        const [dd, mm, yyyy] = parts;
+        d = new Date(parseInt(yyyy, 10), parseInt(mm, 10) - 1, parseInt(dd, 10));
+      }
+    } else if (typeof dateStr === 'string' && dateStr.includes('-')) {
+      // Handle DD-MM-YYYY and YYYY-MM-DD
+      if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) {
+        const [dd, mm, yyyy] = dateStr.split('-');
+        d = new Date(parseInt(yyyy,10), parseInt(mm,10)-1, parseInt(dd,10));
+      } else {
+        d = new Date(dateStr);
+      }
+    } else if (dateStr instanceof Date) {
+      d = dateStr;
+    } else {
+      d = new Date(dateStr);
+    }
+
+    if (!(d instanceof Date) || isNaN(d)) return '';
+
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = String(d.getFullYear()).slice(-2);
+
+    const datePrefix = `CB-${day}${month}${year}`;
+
+    // Count existing entries for this date to get next sequence number
+    const sameDate = entries.filter(entry => {
+      const ed = (typeof entry.date === 'string' && entry.date.includes('/'))
+        ? (() => { const [dd, mm, yyyy] = entry.date.split('/'); return new Date(parseInt(yyyy,10), parseInt(mm,10)-1, parseInt(dd,10)); })()
+        : new Date(entry.date);
+      return ed instanceof Date && !isNaN(ed) && ed.toDateString() === d.toDateString();
+    });
+
+    const sequenceNo = String(sameDate.length + 1).padStart(3, '0');
+    return `${datePrefix}-${sequenceNo}`;
   };
 
   const clearForm = () => {
+    const today = new Date().toISOString().split('T')[0];
     setFormData({
-      date: '',
+      date: today,
+      fy: calculateFY(today),
+      vrNo: generateVRNo(today),
       acHead: 'Cash',
       acName: '',
       description: '',
-      method: '',
-      debit: '',
-      credit: '',
+      method: 'Cash',
+      amount: '',
       transfer: '',
-      fy: ''
+      entryDate: new Date().toLocaleDateString('en-GB')
     });
     setEditIndex(null);
   };
+
+  // Auto-generate FY and VR No when date changes
+  useEffect(() => {
+    if (formData.date) {
+      setFormData(prev => ({
+        ...prev,
+        fy: calculateFY(formData.date),
+        vrNo: generateVRNo(formData.date)
+      }));
+    }
+  }, [formData.date, entries]); // Re-calculate when date or entries change
 
   const clearFilters = () => {
     setFilters({
       date: '',
       fy: '',
+      vrNo: '',
       acHead: '',
       acName: '',
       description: '',
       method: '',
-      debit: '',
-      credit: '',
-      transfer: ''
+      amount: '',
+      transfer: '',
+      entryDate: ''
     });
   };
 
@@ -121,7 +193,16 @@ function CashApp() {
       setFormData(prev => ({
         ...prev,
         [name]: value,
-        fy: calculateFY(value) ? `FY ${calculateFY(value)}` : ''
+        fy: calculateFY(value),
+        vrNo: generateVRNo(value),
+        entryDate: new Date().toLocaleDateString('en-GB') // Auto update entry date
+      }));
+    } else if (name === 'acName') {
+      const autoMethod = value.includes('Kpay') ? 'Kpay' : 'Cash';
+      setFormData(prev => ({
+        ...prev,
+        acName: value,
+        method: autoMethod,
       }));
     } else {
       setFormData(prev => ({
@@ -144,102 +225,89 @@ function CashApp() {
     });
   };
 
+  // A/C Name options as per requirements
+  const acNameOptions = [
+    'Cash In',
+    'Cash Out', 
+    'Kpay In',
+    'Kpay Out'
+  ];
+
+  // Transfer options as per requirements
+  const transferOptions = [
+    'Office',
+    'Kitchen', 
+    'Salary',
+    'Cash-Bank',
+    'Kpay-Bank',
+  ];
+
   // Get unique values for dropdown filters
-  const uniqueFY = [...new Set(entries.map(entry => entry.fy).filter(Boolean))];
+  const uniqueFY = [...new Set(entries
+    .map(entry => entry.fy || calculateFY(entry.date || entry.entryDate))
+    .filter(Boolean)
+  )];
+  const uniqueVrNo = [...new Set(entries.map(entry => entry.vrNo).filter(Boolean))];
   const uniqueAcHead = [...new Set(entries.map(entry => entry.acHead).filter(Boolean))];
   const uniqueAcName = [...new Set(entries.map(entry => entry.acName).filter(Boolean))];
   const uniqueMethod = [...new Set(entries.map(entry => entry.method).filter(Boolean))];
   const uniqueTransfer = [...new Set(entries.map(entry => entry.transfer).filter(Boolean))];
 
   const filteredEntries = entries.filter((entry) => {
-    const entryDate = new Date(entry.date);
-    const startDate = exportRange.startDate ? new Date(exportRange.startDate) : null;
-    const endDate = exportRange.endDate ? new Date(exportRange.endDate) : null;
-
     return (
       (filters.date === '' || (entry.date && entry.date.includes(filters.date))) &&
-      (filters.fy === '' || (entry.fy?.toLowerCase() || '').includes(filters.fy.toLowerCase())) &&
+      (filters.fy === '' || (((entry.fy || calculateFY(entry.date || entry.entryDate)) || '').toLowerCase().includes(filters.fy.toLowerCase()))) &&
+      (filters.vrNo === '' || (entry.vrNo || '').toLowerCase().includes(filters.vrNo.toLowerCase())) &&
       (filters.acHead === '' || (entry.acHead || '').toLowerCase().includes(filters.acHead.toLowerCase())) &&
       (filters.acName === '' || (entry.acName || '').toLowerCase().includes(filters.acName.toLowerCase())) &&
       (filters.description === '' || (entry.description || '').toLowerCase().includes(filters.description.toLowerCase())) &&
       (filters.method === '' || (entry.method || '').toLowerCase().includes(filters.method.toLowerCase())) &&
-      (filters.debit === '' || (entry.debit || '').toString().includes(filters.debit)) &&
-      (filters.credit === '' || (entry.credit || '').toString().includes(filters.credit)) &&
+      (filters.amount === '' || (entry.amount || '').toString().includes(filters.amount)) &&
       (filters.transfer === '' || (entry.transfer || '').toLowerCase().includes(filters.transfer.toLowerCase())) &&
-      (!startDate || entryDate >= startDate) &&
-      (!endDate || entryDate <= endDate)
+      (filters.entryDate === '' || (entry.entryDate && entry.entryDate.includes(filters.entryDate)))
     );
   });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Basic validation
-    if (!formData.date || !formData.acName || !formData.description || !formData.method ||
-        formData.date.trim() === '' || formData.acName.trim() === '' || formData.description.trim() === '' || formData.method.trim() === '') {
-      alert('Please fill in required fields: Date, A/C Name, Description, and Method');
-      console.log('Validation failed for:', { date: formData.date, acName: formData.acName, description: formData.description, method: formData.method });
+    if (!formData.date || !formData.acName || !formData.description || !formData.amount) {
+      alert('Please fill in all required fields (Date, A/C Name, Description, and Amount)');
       return;
     }
 
-    // Ensure at least debit or credit has a value
-    if (!formData.debit && !formData.credit) {
-      alert('Please enter either Debit or Credit amount');
-      return;
-    }
+    const newEntry = {
+      ...formData,
+      amount: parseFloat(formData.amount),
+      fy: calculateFY(formData.date),
+      vrNo: generateVRNo(formData.date),
+      entryDate: new Date().toISOString().split('T')[0]
+    };
 
     try {
-      console.log('=== CASH ENTRY SUBMISSION START ===');
-      console.log('Form Data:', JSON.stringify(formData, null, 2));
-      console.log('Method field value:', formData.method);
-      
       if (editIndex !== null) {
-        const existingEntry = entries[editIndex];
-        if (!existingEntry.id) {
-          alert('Cannot update: This entry was not properly saved to the database.');
-          return;
+        const existingId = entries[editIndex] && entries[editIndex].id ? entries[editIndex].id : null;
+        const entryToSave = existingId ? { ...newEntry, id: existingId } : newEntry;
+
+        // Update local state row
+        setEntries(prev => prev.map((e, i) => (i === editIndex ? entryToSave : e)));
+
+        // Persist to Firestore if this row has an id
+        if (existingId) {
+          await updateFirestoreDoc('cash', String(existingId), entryToSave);
         }
-        
-        const entryData = {
-          ...formData,
-          debit: formData.debit ? parseFloat(formData.debit) || 0 : 0,
-          credit: formData.credit ? parseFloat(formData.credit) || 0 : 0
-        };
-        
-        // Update in Firebase
-        await updateFirestoreDoc('cash', existingEntry.id, entryData);
-        
-        // Update local state
-        const updatedEntries = [...entries];
-        updatedEntries[editIndex] = { ...entryData, id: existingEntry.id };
-        setEntries(updatedEntries);
+
+        setEditIndex(null);
       } else {
-        const entryData = {
-          ...formData,
-          debit: formData.debit ? parseFloat(formData.debit) || 0 : 0,
-          credit: formData.credit ? parseFloat(formData.credit) || 0 : 0,
-          timestamp: new Date().toISOString()
-        };
-        
-        console.log('Processed entry data:', JSON.stringify(entryData, null, 2));
-        console.log('Calling addCashEntry...');
-        const savedEntry = await addCashEntry(entryData);
-        console.log('Entry saved successfully:', savedEntry);
-        
-        // Force refresh entries from Firebase to confirm save
-        console.log('Refreshing entries from Firebase...');
-        // Note: entries will be updated via the addCashEntry function in DataContext
+        // Add flow handled by DataContext (adds id and appends to state)
+        await addCashEntry(newEntry);
       }
-      clearForm();
-      console.log('=== CASH ENTRY SUBMISSION SUCCESS ===');
-      alert('Cash entry saved successfully!');
-    } catch (error) {
-      console.error('=== CASH ENTRY SUBMISSION ERROR ===');
-      console.error('Error saving cash entry:', error);
-      console.error('Error details:', error.message);
-      console.error('Stack trace:', error.stack);
-      alert(`Error saving cash entry: ${error.message}. Please check console for details.`);
+    } catch (err) {
+      console.error('Error saving cash entry:', err);
+      alert('Failed to save entry. Please try again.');
     }
+
+    clearForm();
   };
 
   const handleEdit = (index) => {
@@ -251,31 +319,32 @@ function CashApp() {
     try {
       const entry = entries[index];
       console.log('Cash entry to delete:', entry);
-      
+
       if (!entry.id) {
-        alert('Cannot delete: This entry was not properly saved to the database.');
-        return;
+        // Soft delete from local state if the entry has no Firestore ID
+        setEntries(prev => prev.filter((_, i) => i !== index));
+        alert('Deleted locally. Note: This entry was not in the database.');
+      } else {
+        await deleteCashEntry(entry);
+        alert('Cash entry deleted successfully!');
       }
-      
-      await deleteCashEntry(entry);
-      alert('Cash entry deleted successfully!');
     } catch (error) {
       console.error('Error deleting cash entry:', error);
       alert(`Error deleting cash entry: ${error.message}. Please try again.`);
     }
   };
 
-  // 📌 Excel Export with headers (UI table + Entry Date)
+  // 📌 Excel Export with headers
   const exportToExcel = () => {
     const headers = [
       "Date",
-      "FY",
+      "FY", 
+      "VR No",
       "A/C Head",
       "A/C Name",
       "Description",
       "Method",
-      "Debit",
-      "Credit",
+      "Amount",
       "Transfer",
       "Entry Date"
     ];
@@ -283,63 +352,123 @@ function CashApp() {
     const dataToExport = filteredEntries.map(entry => [
       formatDate(entry.date),
       entry.fy,
+      entry.vrNo,
       entry.acHead,
       entry.acName,
       entry.description,
       entry.method,
-      entry.debit,
-      entry.credit,
+      entry.amount,
       entry.transfer,
-      formatDate(entry.timestamp || entry.entryDate || entry.date || new Date().toISOString().split('T')[0])
+      formatDate(entry.entryDate || new Date().toLocaleDateString('en-GB'))
     ]);
 
     const worksheetData = [headers, ...dataToExport];
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Cash Book');
-    XLSX.writeFile(workbook, 'cash_book.xlsx');
+    XLSX.writeFile(workbook, 'Cash_book.xlsx');
   };
 
   const importFromCSV = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files && e.target.files[0];
     if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = event.target.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
-    excelFormatCSVImport(
-      file,
-      'cash',
-      // Success callback
-      (result) => {
-        setCashEntries(prev => [...prev, ...result.data]);
-        alert(`✅ ${result.message}\n\nImported ${result.successfulRows} entries successfully!\n\nFormat: Excel export format (same columns and order)`);
-      },
-      // Error callback
-      (error) => {
-        alert(`❌ CSV Import Failed:\n\n${error}\n\n💡 Solution:\n• CSV must match Excel export format exactly\n• Use the CSV Fix tool to download correct sample`);
+        if (!rows.length) {
+          alert('CSV has no data rows.');
+          return;
+        }
+
+        const todayGB = new Date().toLocaleDateString('en-GB');
+        const toISO = (dateStr) => {
+          if (!dateStr) return '';
+          if (typeof dateStr === 'string' && dateStr.includes('/')) {
+            const [dd, mm, yyyy] = dateStr.split('/');
+            const d = new Date(parseInt(yyyy,10), parseInt(mm,10)-1, parseInt(dd,10));
+            if (!isNaN(d)) return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            return '';
+          }
+          if (typeof dateStr === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(dateStr)) {
+            const [dd, mm, yyyy] = dateStr.split('-');
+            const d = new Date(parseInt(yyyy,10), parseInt(mm,10)-1, parseInt(dd,10));
+            if (!isNaN(d)) return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            return '';
+          }
+          return dateStr; // assume ISO
+        };
+
+        const mapped = rows.map((row) => {
+          const rawDate = row['Date'] || row['date'] || row['Entry Date'] || todayGB;
+          const isoDate = toISO(rawDate);
+          const fy = row['FY'] || row['fy'] || calculateFY(isoDate);
+          const csvVr = row['VR No'] || row['vrNo'] || '';
+          const acHead = row['A/C Head'] || row['acHead'] || 'Cash';
+          const acName = row['A/C Name'] || row['acName'] || '';
+          const description = row['Description'] || row['description'] || '';
+          const method = row['Method'] || row['method'] || '';
+          const amountRaw = row['Amount'] || row['amount'] || '0';
+          const amount = parseFloat(String(amountRaw).toString().replace(/,/g, '')) || 0;
+          const transfer = row['Transfer'] || row['transfer'] || '';
+          const entryDate = row['Entry Date'] || row['entryDate'] || todayGB;
+
+          const computedFY = fy || calculateFY(isoDate);
+          const vrNo = csvVr || generateVRNo(isoDate);
+
+          return {
+            date: isoDate,
+            fy: computedFY,
+            vrNo,
+            acHead,
+            acName,
+            description,
+            method,
+            amount,
+            transfer,
+            entryDate
+          };
+        });
+
+        const saved = await bulkReplaceCash(mapped);
+        setEntries(saved);
+        alert(`Successfully imported ${saved.length} entries (overwritten).`);
+      } catch (err) {
+        console.error('CSV/XLSX Import Error:', err);
+        alert('Failed to import. Please check the file.');
       }
-    );
-
-    // Reset file input
-    e.target.value = '';
+    };
+    reader.readAsBinaryString(file);
   };
 
-  const totalDebit = filteredEntries.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
-  const totalCredit = filteredEntries.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
-  const netBalance = totalDebit - totalCredit;
+  const totalBalance = filteredEntries.reduce((sum, entry) => sum + (parseFloat(entry.amount) || 0), 0);
+  const totalCash = filteredEntries
+    .filter(e => (e.method || '').toLowerCase() === 'cash')
+    .reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  const totalKpay = filteredEntries
+    .filter(e => (e.method || '').toLowerCase() === 'kpay')
+    .reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  const totalBalances = totalCash + totalKpay;
 
   return (
     <div style={{ padding: 15, backgroundColor: '#f5f6fa', minHeight: '100vh' }}>
       {/* Header & Totals */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, backgroundColor: 'white', padding: '15px 20px', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-        <h2 style={{ color: '#2c3e50', margin: 0, fontSize: 24 }}>Bank Book</h2>
-        <div style={{ display: 'flex', gap: 15, alignItems: 'center' }}>
-          <div style={{ backgroundColor: '#3498db', color: 'white', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
-            Total Debit: {formatNumber(totalDebit)}
+        <h2 style={{ color: '#2c3e50', margin: 0, fontSize: 24 }}>Cash Book</h2>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ backgroundColor: '#3498db', color: 'white', padding: '8px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
+            Total Cash: {formatNumber(totalCash)}
           </div>
-          <div style={{ backgroundColor: '#2ecc71', color: 'white', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
-            Total Credit: {formatNumber(totalCredit)}
+          <div style={{ backgroundColor: '#3498db', color: 'white', padding: '8px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
+            Total Kpay: {formatNumber(totalKpay)}
           </div>
-          <div style={{ backgroundColor: netBalance >= 0 ? '#2ecc71' : '#e74c3c', color: 'white', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
-            Net Balance: {formatNumber(netBalance)}
+          <div style={{ backgroundColor: '#2ecc71', color: 'white', padding: '8px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
+            Total Balances: {formatNumber(totalBalances)}
           </div>
           <div style={{ backgroundColor: '#9b59b6', color: 'white', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', fontSize: 12 }}>
             Total Entries: {filteredEntries.length}
@@ -347,200 +476,306 @@ function CashApp() {
         </div>
       </div>
 
-      {/* Compact Entry Form */}
-      <form id="CashEntryForm" onSubmit={handleSubmit} style={{ backgroundColor: 'white', padding: 15, borderRadius: 8, marginBottom: 15, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-        {/* First row - Main form fields */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
+      {/* Two-Line Beautiful Entry Form */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin: '6px 2px' }}>
+        <h3 style={{ margin: 0, color: '#34495e', fontSize: '16px' }}>Add Cash Entry</h3>
+      </div>
+      <form id="cashEntryForm" onSubmit={handleSubmit} style={{ backgroundColor: 'white', padding: 15, borderRadius: 8, marginBottom: 15, boxShadow: '0 4px 12px rgba(0,0,0,0.15)', border: '1px solid #e0e0e0' }}>
+        {/* First Row - 5 fields */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.8fr 1fr 1fr 1.2fr', gap: 10, alignItems: 'center', marginBottom: 10 }}>
           <input
             type="date"
             name="date"
             value={formData.date}
             onChange={handleInputChange}
             required
-            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+            style={{ 
+              padding: 8, 
+              border: '2px solid #3498db', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              backgroundColor: '#f0f8ff',
+              height: '40px'
+            }}
           />
           <input
             type="text"
             name="fy"
             value={formData.fy}
             readOnly
-            placeholder="Fiscal Year"
-            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, backgroundColor: '#ecf0f1', fontSize: 12 }}
+            placeholder="FY"
+            style={{ 
+              padding: 8, 
+              border: '2px solid #95a5a6', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              backgroundColor: '#f8f9fa',
+              color: '#2c3e50',
+              height: '40px'
+            }}
+          />
+          <input
+            type="text"
+            name="vrNo"
+            value={formData.vrNo}
+            readOnly
+            placeholder="VR No"
+            style={{ 
+              padding: 8, 
+              border: '2px solid #95a5a6', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              backgroundColor: '#f8f9fa',
+              color: '#2c3e50',
+              height: '40px'
+            }}
           />
           <input
             type="text"
             name="acHead"
             value={formData.acHead}
-            onChange={handleInputChange}
-            placeholder="Account Head"
-            required
-            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+            readOnly
+            placeholder="A/C Head"
+            style={{ 
+              padding: 8, 
+              border: '2px solid #95a5a6', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              backgroundColor: '#f8f9fa',
+              color: '#2c3e50',
+              height: '40px'
+            }}
           />
           <select
             name="acName"
             value={formData.acName}
             onChange={handleInputChange}
             required
-            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+            style={{ 
+              padding: 8, 
+              border: '2px solid #3498db', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              backgroundColor: '#f0f8ff',
+              height: '40px'
+            }}
           >
             <option value="">Select A/C Name</option>
-            <option>Cash-In</option>
-            <option>Kpay-In</option>
-            <option>Cash-Out</option>
-            <option>Kpay-Out</option>
+            {acNameOptions.map(option => (
+              <option key={option} value={option}>{option}</option>
+            ))}
           </select>
-
-
-          <input
-            type="number"
-            name="debit"
-            value={formData.debit}
-            onChange={handleInputChange}
-            placeholder="Debit"
-            step="0.01"
-            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
-          />
-          <input
-            type="number"
-            name="credit"
-            value={formData.credit}
-            onChange={handleInputChange}
-            placeholder="Credit"
-            step="0.01"
-            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
-          />
         </div>
         
-        {/* Second row - Transfer, Method, Description */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 10, marginBottom: 12 }}>          
+        {/* Second Row - 4 fields */}
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1.2fr', gap: 10, alignItems: 'center' }}>
+          <input
+            name="description"
+            value={formData.description}
+            onChange={handleInputChange}
+            placeholder="Description"
+            required
+            style={{ 
+              padding: 8, 
+              border: '2px solid #3498db', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              backgroundColor: '#f0f8ff',
+              height: '40px'
+            }}
+          />
+          <input
+            type="text"
+            name="method"
+            value={formData.method}
+            readOnly
+            placeholder="Method"
+            style={{ 
+              padding: 8, 
+              border: '2px solid #95a5a6', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              backgroundColor: '#f8f9fa',
+              color: '#2c3e50',
+              height: '40px'
+            }}
+          />
+          <input
+            type="number"
+            name="amount"
+            value={formData.amount}
+            onChange={handleInputChange}
+            placeholder="Amount"
+            step="0.01"
+            required
+            style={{ 
+              padding: 8, 
+              border: '2px solid #3498db', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              backgroundColor: '#f0f8ff',
+              height: '40px'
+            }}
+          />
           <select
             name="transfer"
             value={formData.transfer}
             onChange={handleInputChange}
-            style={{ padding: 6, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12 }}
+            style={{ 
+              padding: 8, 
+              border: '2px solid #3498db', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              backgroundColor: '#f0f8ff',
+              height: '40px'
+            }}
           >
             <option value="">Select Transfer</option>
-            <option>Office Exp</option>
-            <option>Salary Exp</option>
-            <option>Kitchen Exp</option>
-            <option>Salary Exp</option>
-            <option>Cash-Bank</option>
-            <option>Kpay-Bank</option>
-            
+            {transferOptions.map(option => (
+              <option key={option} value={option}>{option}</option>
+            ))}
           </select>
-          <select
-            name="method"
-            value={formData.method || ''}
-            onChange={handleInputChange}
-            style={{ 
-              padding: 6, 
-              border: '1px solid #bdc3c7', 
-              borderRadius: 4, 
-              fontSize: 12,
-              backgroundColor: '#ffffff',
-              color: '#333333',
-              minHeight: '30px'
-            }}
-            required
-          >
-            <option value="" style={{color: '#999999'}}>Select Method</option>
-            <option value="Cash" style={{color: '#333333'}}>Cash</option>
-            <option value="Kpay" style={{color: '#333333'}}>Kpay</option>
-            <option value="Others" style={{color: '#333333'}}>Others</option>
-          </select>
-          <input
-            type="text"
-            name="description"
-            value={formData.description}
-            onChange={handleInputChange}
-            placeholder="Description (extended for longer text)"
-            style={{ 
-              padding: 6, 
-              border: '1px solid #bdc3c7', 
-              borderRadius: 4, 
-              fontSize: 12
-            }}
-          />
-        </div>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button type="submit" style={{ padding: '8px 16px', backgroundColor: '#2c3e50', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 'bold' }}>
-            {editIndex !== null ? 'Update' : 'Add'} Entry
-          </button>
-          <button type="button" onClick={clearForm} style={{ padding: '8px 16px', backgroundColor: '#7f8c8d', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
-            Clear
-          </button>
         </div>
       </form>
 
-      {/* Export/Import Controls */}
-      <div style={{ marginBottom: 15, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', backgroundColor: 'white', padding: '12px 15px', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-        <label style={{ fontSize: 12, color: '#2c3e50' }}>
-          Start Date:{' '}
-          <input
-            type="date"
-            value={exportRange.startDate}
-            onChange={e => setExportRange(prev => ({ ...prev, startDate: e.target.value }))}
-            style={{ marginLeft: 5, padding: 4, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 11 }}
-          />
-        </label>
-        <label style={{ fontSize: 12, color: '#2c3e50' }}>
-          End Date:{' '}
-          <input
-            type="date"
-            value={exportRange.endDate}
-            onChange={e => setExportRange(prev => ({ ...prev, endDate: e.target.value }))}
-            style={{ marginLeft: 5, padding: 4, border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 11 }}
-          />
-        </label>
-        <button
-          onClick={exportToExcel}
-          style={{ padding: '8px 12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}
-        >
-          Export Excel
-        </button>
+      {/* Action Buttons Row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: '12px 15px', borderRadius: 8, marginBottom: 15, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+        {/* Left Side - Action Buttons */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            style={{ 
+              padding: '10px 16px', 
+              backgroundColor: editIndex !== null ? '#f39c12' : '#2ecc71', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: 6, 
+              cursor: 'pointer', 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              boxShadow: editIndex !== null ? '0 2px 4px rgba(243, 156, 18, 0.3)' : '0 2px 4px rgba(46, 204, 113, 0.3)'
+            }}
+          >
+            {editIndex !== null ? '✓ Update Entry' : '+ Add Entry'}
+          </button>
+          <button
+            type="button"
+            onClick={clearForm}
+            style={{ 
+              padding: '10px 16px', 
+              backgroundColor: '#e74c3c', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: 6, 
+              cursor: 'pointer', 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              boxShadow: '0 2px 4px rgba(231, 76, 60, 0.3)'
+            }}
+          >
+            ✕ Clear Form
+          </button>
+        </div>
 
-        <label
-          style={{ padding: '8px 12px', backgroundColor: '#e67e22', color: 'white', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}
-        >
-          Import CSV
-          <input type="file" accept=".csv" onChange={importFromCSV} style={{ display: 'none' }} />
-        </label>
+        {/* Right Side - Export/Import Controls */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <label style={{ fontSize: 12, color: '#2c3e50', fontWeight: 'bold' }}>
+            Start Date:{' '}
+            <input
+              type="date"
+              value={exportRange.startDate}
+              onChange={e => setExportRange(prev => ({ ...prev, startDate: e.target.value }))}
+              style={{ marginLeft: 5, padding: '6px', border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12, fontWeight: 'bold' }}
+            />
+          </label>
+          <label style={{ fontSize: 12, color: '#2c3e50', fontWeight: 'bold' }}>
+            End Date:{' '}
+            <input
+              type="date"
+              value={exportRange.endDate}
+              onChange={e => setExportRange(prev => ({ ...prev, endDate: e.target.value }))}
+              style={{ marginLeft: 5, padding: '6px', border: '1px solid #bdc3c7', borderRadius: 4, fontSize: 12, fontWeight: 'bold' }}
+            />
+          </label>
+          <button
+            onClick={exportToExcel}
+            style={{ 
+              padding: '10px 16px', 
+              backgroundColor: '#3498db', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: 6, 
+              cursor: 'pointer', 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              boxShadow: '0 2px 4px rgba(52, 152, 219, 0.3)'
+            }}
+          >
+            Export Excel
+          </button>
+          <label
+            style={{ 
+              padding: '10px 16px', 
+              backgroundColor: '#f39c12', 
+              color: 'white', 
+              borderRadius: 6, 
+              cursor: 'pointer', 
+              fontSize: 12, 
+              fontWeight: 'bold',
+              boxShadow: '0 2px 4px rgba(243, 156, 18, 0.3)'
+            }}
+          >
+            Import CSV
+            <input type="file" accept=".xlsx,.csv" onChange={importFromCSV} style={{ display: 'none' }} />
+          </label>
+        </div>
       </div>
+
+
 
       {/* Data Table */}
       <div style={{ overflowX: 'auto', maxHeight: '70vh' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginTop: '0', fontSize: '11px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginTop: '0', fontSize: '12px' }}>
           <thead style={{ position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#27ae60' }}>
 
             <tr style={{ backgroundColor: '#27ae60', color: 'white' }}>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '80px' }}>Date</th>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '60px' }}>FY</th>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '80px' }}>A/C Head</th>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '90px' }}>A/C Name</th>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '300px' }}>Description</th>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '70px' }}>Method</th>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '85px' }}>Debit</th>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '85px' }}>Credit</th>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '85px' }}>Transfer</th>
-              <th style={{ padding: '6px', border: '1px solid #ddd', fontSize: '11px', fontWeight: 'bold', lineHeight: '1.2', width: '80px', textAlign: 'center' }}>Actions</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '90px' }}>Date</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '70px' }}>FY</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '100px' }}>VR No</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '90px' }}>A/C Head</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '140px' }}>A/C Name</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '250px' }}>Description</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '80px' }}>Method</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '100px' }}>Amount</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '100px' }}>Transfer</th>
+              <th style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px', fontWeight: 'bold', lineHeight: '1.2', width: '90px', textAlign: 'center' }}>Actions</th>
             </tr>
             <tr style={{ backgroundColor: '#27ae60', color: 'white' }}>
-              <th style={{ width: '80px', backgroundColor: '#27ae60', padding: '4px' }}>
+              <th style={{ width: '90px', backgroundColor: '#27ae60', padding: '6px' }}>
                 <input
                   type="date"
                   name="date"
                   value={filters.date}
                   onChange={handleFilterChange}
-                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                  style={{ width: '100%', padding: 4, border: 'none', fontSize: 12, borderRadius: 3, backgroundColor: 'white', color: '#333', fontWeight: 'bold' }}
                 />
               </th>
-              <th style={{ width: '60px', backgroundColor: '#27ae60', padding: '4px' }}>
+              <th style={{ width: '70px', backgroundColor: '#27ae60', padding: '6px' }}>
                 <select
                   name="fy"
                   value={filters.fy}
                   onChange={handleFilterChange}
-                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                  style={{ width: '100%', padding: 4, border: 'none', fontSize: 12, borderRadius: 3, backgroundColor: 'white', color: '#333', fontWeight: 'bold' }}
                 >
                   <option value="">All FY</option>
                   {uniqueFY.map(fy => (
@@ -548,12 +783,22 @@ function CashApp() {
                   ))}
                 </select>
               </th>
-              <th style={{ width: '80px', backgroundColor: '#27ae60', padding: '4px' }}>
+              <th style={{ width: '100px', backgroundColor: '#27ae60', padding: '6px' }}>
+                <input
+                  type="text"
+                  name="vrNo"
+                  value={filters.vrNo}
+                  onChange={handleFilterChange}
+                  placeholder="VR No"
+                  style={{ width: '100%', padding: 4, border: 'none', fontSize: 12, borderRadius: 3, backgroundColor: 'white', color: '#333', fontWeight: 'bold' }}
+                />
+              </th>
+              <th style={{ width: '90px', backgroundColor: '#27ae60', padding: '6px' }}>
                 <select
                   name="acHead"
                   value={filters.acHead}
                   onChange={handleFilterChange}
-                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                  style={{ width: '100%', padding: 4, border: 'none', fontSize: 12, borderRadius: 3, backgroundColor: 'white', color: '#333', fontWeight: 'bold' }}
                 >
                   <option value="">All Head</option>
                   {uniqueAcHead.map(head => (
@@ -561,35 +806,34 @@ function CashApp() {
                   ))}
                 </select>
               </th>
-              <th style={{ width: '90px', backgroundColor: '#27ae60', padding: '4px' }}>
+              <th style={{ width: '140px', backgroundColor: '#27ae60', padding: '6px' }}>
                 <select
                   name="acName"
                   value={filters.acName}
                   onChange={handleFilterChange}
-                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                  style={{ width: '100%', padding: 4, border: 'none', fontSize: 12, borderRadius: 3, backgroundColor: 'white', color: '#333', fontWeight: 'bold' }}
                 >
                   <option value="">All Name</option>
-                  {uniqueAcName.map(name => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
+                  <option value="Cash In">Cash In</option>
+                  <option value="Cash Out">Cash Out</option>
                 </select>
               </th>
-              <th style={{ width: '300px', backgroundColor: '#27ae60', padding: '4px' }}>
+              <th style={{ width: '250px', backgroundColor: '#27ae60', padding: '6px' }}>
                 <input
                   type="text"
                   name="description"
                   placeholder="Description"
                   value={filters.description}
                   onChange={handleFilterChange}
-                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                  style={{ width: '100%', padding: 4, border: 'none', fontSize: 12, borderRadius: 3, backgroundColor: 'white', color: '#333', fontWeight: 'bold' }}
                 />
               </th>
-              <th style={{ width: '70px', backgroundColor: '#27ae60', padding: '4px' }}>
+              <th style={{ width: '80px', backgroundColor: '#27ae60', padding: '6px' }}>
                 <select
                   name="method"
                   value={filters.method}
                   onChange={handleFilterChange}
-                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                  style={{ width: '100%', padding: 4, border: 'none', fontSize: 12, borderRadius: 3, backgroundColor: 'white', color: '#333', fontWeight: 'bold' }}
                 >
                   <option value="">All Method</option>
                   {uniqueMethod.map(method => (
@@ -597,32 +841,22 @@ function CashApp() {
                   ))}
                 </select>
               </th>
-              <th style={{ width: '85px', backgroundColor: '#27ae60', padding: '4px' }}>
+              <th style={{ width: '100px', backgroundColor: '#27ae60', padding: '6px' }}>
                 <input
                   type="text"
-                  name="debit"
-                  placeholder="Debit"
-                  value={filters.debit}
+                  name="amount"
+                  placeholder="Amount"
+                  value={filters.amount}
                   onChange={handleFilterChange}
-                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                  style={{ width: '100%', padding: 4, border: 'none', fontSize: 12, borderRadius: 3, backgroundColor: 'white', color: '#333', fontWeight: 'bold' }}
                 />
               </th>
-              <th style={{ width: '85px', backgroundColor: '#27ae60', padding: '4px' }}>
-                <input
-                  type="text"
-                  name="credit"
-                  placeholder="Credit"
-                  value={filters.credit}
-                  onChange={handleFilterChange}
-                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
-                />
-              </th>
-              <th style={{ width: '85px', backgroundColor: '#27ae60', padding: '4px' }}>
+              <th style={{ width: '100px', backgroundColor: '#27ae60', padding: '4px' }}>
                 <select
                   name="transfer"
                   value={filters.transfer}
                   onChange={handleFilterChange}
-                  style={{ width: '100%', padding: 2, border: 'none', fontSize: 9, borderRadius: 2, backgroundColor: 'white', color: '#333' }}
+                  style={{ width: '100%', padding: 4, border: 'none', fontSize: 12, borderRadius: 2, backgroundColor: 'white', color: '#333', fontWeight: 'bold' }}
                 >
                   <option value="">All Transfer</option>
                   {uniqueTransfer.map(transfer => (
@@ -651,18 +885,18 @@ function CashApp() {
           <tbody>
             {filteredEntries.map((entry, index) => (
               <tr key={index} style={{ borderBottom: '1px solid #ecf0f1', backgroundColor: index % 2 === 0 ? '#ffffff' : '#f8f9fa' }}>
-                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '80px' }}>{formatDate(entry.date)}</td>
-                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '60px' }}>{entry.fy}</td>
-                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '80px' }}>{entry.acHead}</td>
-                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '90px' }}>{entry.acName}</td>
-                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '300px', wordWrap: 'break-word', maxWidth: '300px' }}>{entry.description}</td>
-                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '70px' }}>{entry.method}</td>
-                <td style={{ padding: 4, fontSize: 11, textAlign: 'right', borderRight: '1px solid #ecf0f1', color: '#e74c3c', fontWeight: 'bold', width: '85px' }}>{formatNumber(entry.debit)}</td>
-                <td style={{ padding: 4, fontSize: 11, textAlign: 'right', borderRight: '1px solid #ecf0f1', color: '#2ecc71', fontWeight: 'bold', width: '85px' }}>{formatNumber(entry.credit)}</td>
-                <td style={{ padding: 4, fontSize: 11, borderRight: '1px solid #ecf0f1', width: '85px' }}>{entry.transfer}</td>
-                <td style={{ padding: 4, fontSize: 11, width: '80px', textAlign: 'center' }}>
-                  <button onClick={() => handleEdit(index)} style={{ marginRight: 2, padding: '2px 4px', fontSize: 9, backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: 2, cursor: 'pointer' }}>Edit</button>
-                  <button onClick={() => handleDelete(index)} style={{ padding: '2px 4px', fontSize: 9, backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: 2, cursor: 'pointer' }}>Del</button>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', borderRight: '1px solid #ecf0f1', width: '90px' }}>{formatDate(entry.date)}</td>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', borderRight: '1px solid #ecf0f1', width: '70px' }}>{entry.fy || calculateFY(entry.date || entry.entryDate)}</td>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', borderRight: '1px solid #ecf0f1', width: '100px' }}>{entry.vrNo}</td>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', borderRight: '1px solid #ecf0f1', width: '90px' }}>{entry.acHead}</td>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', borderRight: '1px solid #ecf0f1', width: '140px' }}>{entry.acName}</td>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', borderRight: '1px solid #ecf0f1', width: '250px', wordWrap: 'break-word', maxWidth: '250px' }}>{entry.description}</td>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', borderRight: '1px solid #ecf0f1', width: '80px' }}>{entry.method}</td>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', textAlign: 'right', borderRight: '1px solid #ecf0f1', color: '#27ae60', width: '100px' }}>{formatNumber(entry.amount)}</td>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', borderRight: '1px solid #ecf0f1', width: '100px' }}>{entry.transfer}</td>
+                <td style={{ padding: 6, fontSize: 12, fontWeight: 'bold', width: '90px', textAlign: 'center' }}>
+                  <button onClick={() => handleEdit(index)} style={{ marginRight: 4, padding: '4px 8px', fontSize: 10, fontWeight: 'bold', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer' }}>Edit</button>
+                  <button onClick={() => handleDelete(index)} style={{ padding: '4px 8px', fontSize: 10, fontWeight: 'bold', backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer' }}>Del</button>
                 </td>
               </tr>
             ))}

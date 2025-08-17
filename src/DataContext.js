@@ -1,8 +1,50 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { cashBookService } from './firebase-services';
-import { authService } from './firebase-services';
+import * as XLSX from 'xlsx';
+import { db } from './firebase-config';
+import { 
+  collection, 
+  addDoc, 
+  getDocs, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  onSnapshot,
+  query,
+  orderBy,
+  writeBatch 
+} from 'firebase/firestore';
 
 const DataContext = createContext();
+const LOCAL_MODE = String(process.env.REACT_APP_LOCAL_MODE || '').toLowerCase() === 'true';
+
+// Local storage helpers for LOCAL_MODE
+const inMemoryStore = {};
+const hasLS = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+const lsKey = (collectionName) => `cb_${collectionName}`;
+const readLS = (collectionName) => {
+  try {
+    if (hasLS) {
+      const raw = window.localStorage.getItem(lsKey(collectionName));
+      return raw ? JSON.parse(raw) : [];
+    }
+    return Array.isArray(inMemoryStore[collectionName]) ? inMemoryStore[collectionName] : [];
+  } catch (e) {
+    console.warn('Failed to read local storage for', collectionName, e);
+    return Array.isArray(inMemoryStore[collectionName]) ? inMemoryStore[collectionName] : [];
+  }
+};
+const writeLS = (collectionName, arr) => {
+  try {
+    if (hasLS) {
+      window.localStorage.setItem(lsKey(collectionName), JSON.stringify(arr || []));
+    } else {
+      inMemoryStore[collectionName] = Array.isArray(arr) ? arr : [];
+    }
+  } catch (e) {
+    console.warn('Failed to write local storage for', collectionName, e);
+    inMemoryStore[collectionName] = Array.isArray(arr) ? arr : [];
+  }
+};
 
 export const useData = () => {
   const context = useContext(DataContext);
@@ -12,757 +54,1080 @@ export const useData = () => {
   return context;
 };
 
+
+
 export const DataProvider = ({ children }) => {
-  // Get current user for Firebase operations
-  const [user, setUser] = useState(null);
-  
-  // Set up Firebase auth state listener
-  useEffect(() => {
-    const unsubscribe = authService.onAuthStateChange((currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
-  }, []);
-  
-  // Local data states (your existing data structure)
+  // Shared data states
+  const [customers, setCustomers] = useState([]);
+  const [invoices, setInvoices] = useState([]);
   const [incomeEntries, setIncomeEntries] = useState([]);
-  const [officeEntries, setOfficeEntries] = useState([]);
-  const [salaryEntries, setSalaryEntries] = useState([]);
-  const [kitchenEntries, setKitchenEntries] = useState([]);
   const [bankEntries, setBankEntries] = useState([]);
   const [cashEntries, setCashEntries] = useState([]);
-  const [customers, setCustomers] = useState([]);
+  const [officeEntries, setOfficeEntries] = useState([]);
+  const [kitchenEntries, setKitchenEntries] = useState([]);
+  const [salaryEntries, setSalaryEntries] = useState([]);
+  const [rulesEntries, setRulesEntries] = useState([]);
 
-  // Load data from Firebase when user is authenticated
-  useEffect(() => {
-    const loadFirebaseData = async () => {
-      if (!user) return;
-      
-      try {
-        console.log('Loading data from Firebase for user:', user.uid);
-        
-        // Load Income entries from Firebase
-        const incomeResult = await cashBookService.getIncomeEntries(user.uid);
-        if (incomeResult.success) {
-          setIncomeEntries(incomeResult.data);
-          console.log('Loaded', incomeResult.data.length, 'income entries from Firebase');
-        }
-        
-        // Load Office entries from Firebase (expense type: office)
-        const expenseResult = await cashBookService.getExpenseEntries(user.uid);
-        if (expenseResult.success) {
-          const officeEntries = expenseResult.data.filter(entry => entry.type === 'office');
-          const salaryEntries = expenseResult.data.filter(entry => entry.type === 'salary');
-          const kitchenEntries = expenseResult.data.filter(entry => entry.type === 'kitchen');
-          
-          setOfficeEntries(officeEntries);
-          setSalaryEntries(salaryEntries);
-          setKitchenEntries(kitchenEntries);
-          
-          console.log('Loaded', officeEntries.length, 'office entries from Firebase');
-          console.log('Loaded', salaryEntries.length, 'salary entries from Firebase');
-          console.log('Loaded', kitchenEntries.length, 'kitchen entries from Firebase');
-        }
-        
-        // Load Bank entries from Firebase
-        const bankResult = await cashBookService.getBankEntries(user.uid);
-        if (bankResult.success) {
-          setBankEntries(bankResult.data);
-          console.log('Loaded', bankResult.data.length, 'bank entries from Firebase');
-        }
-        
-        // Load Cash entries from Firebase
-        const cashResult = await cashBookService.getCashEntries(user.uid);
-        if (cashResult.success) {
-          setCashEntries(cashResult.data);
-          console.log('Loaded', cashResult.data.length, 'cash entries from Firebase');
-        }
-        
-        // Load Customers from Firebase
-        const customersResult = await cashBookService.getCustomers(user.uid);
-        if (customersResult.success) {
-          setCustomers(customersResult.data);
-          console.log('Loaded', customersResult.data.length, 'customers from Firebase');
-        }
-        
-      } catch (error) {
-        console.error('Error loading data from Firebase:', error);
-        // Fallback to localStorage if Firebase fails
-        loadLocalData();
-      }
-    };
-
-    const loadLocalData = () => {
-      try {
-        const savedIncomeEntries = localStorage.getItem('incomeEntries');
-        const savedOfficeEntries = localStorage.getItem('officeEntries');
-        const savedSalaryEntries = localStorage.getItem('salaryEntries');
-        const savedKitchenEntries = localStorage.getItem('kitchenEntries');
-        const savedBankEntries = localStorage.getItem('bankEntries');
-        const savedCashEntries = localStorage.getItem('cashEntries');
-        const savedCustomers = localStorage.getItem('customers');
-
-        if (savedIncomeEntries) setIncomeEntries(JSON.parse(savedIncomeEntries));
-        if (savedOfficeEntries) setOfficeEntries(JSON.parse(savedOfficeEntries));
-        if (savedSalaryEntries) setSalaryEntries(JSON.parse(savedSalaryEntries));
-        if (savedKitchenEntries) setKitchenEntries(JSON.parse(savedKitchenEntries));
-        if (savedBankEntries) setBankEntries(JSON.parse(savedBankEntries));
-        if (savedCashEntries) setCashEntries(JSON.parse(savedCashEntries));
-        if (savedCustomers) setCustomers(JSON.parse(savedCustomers));
-      } catch (error) {
-        console.error('Error loading data from localStorage:', error);
-      }
-    };
-
-    // Firebase is working! Load from Firebase when user is authenticated
-    if (user) {
-      console.log('🔥 Loading data from Firebase for user:', user.uid);
-      loadFirebaseData();
-    } else {
-      console.log('📦 Loading data from localStorage (no user authenticated)');
-      loadLocalData();
+  // Firebase Firestore functions
+  const saveToFirestore = async (collectionName, data) => {
+    if (LOCAL_MODE) {
+      const arr = readLS(collectionName);
+      const id = `local_${collectionName}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const item = { ...data, id, timestamp: new Date().toISOString() };
+      arr.unshift(item); // keep newest first for tables that expect desc
+      writeLS(collectionName, arr);
+      return id;
     }
-  }, [user]);
+    try {
+      const docRef = await addDoc(collection(db, collectionName), {
+        ...data,
+        timestamp: new Date()
+      });
+      return docRef.id;
+    } catch (error) {
+      console.error('Error saving to Firestore:', error);
+      throw error;
+    }
+  };
 
-  // Save data to localStorage whenever state changes
-  useEffect(() => {
-    localStorage.setItem('incomeEntries', JSON.stringify(incomeEntries));
-  }, [incomeEntries]);
-
-  useEffect(() => {
-    localStorage.setItem('officeEntries', JSON.stringify(officeEntries));
-  }, [officeEntries]);
-
-  useEffect(() => {
-    localStorage.setItem('salaryEntries', JSON.stringify(salaryEntries));
-  }, [salaryEntries]);
-
-  useEffect(() => {
-    localStorage.setItem('kitchenEntries', JSON.stringify(kitchenEntries));
-  }, [kitchenEntries]);
-
-  useEffect(() => {
-    localStorage.setItem('bankEntries', JSON.stringify(bankEntries));
-  }, [bankEntries]);
-
-  useEffect(() => {
-    localStorage.setItem('cashEntries', JSON.stringify(cashEntries));
-  }, [cashEntries]);
-
-  useEffect(() => {
-    localStorage.setItem('customers', JSON.stringify(customers));
-  }, [customers]);
-
-  // Enhanced CSV Import functionality with better parsing
-  const importCSVData = async (file, bookType) => {
-    return new Promise((resolve, reject) => {
-      // Validate file type
-      if (!file.name.toLowerCase().endsWith('.csv')) {
-        reject(new Error('Please select a CSV file (.csv extension required)'));
-        return;
-      }
-
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        reject(new Error('File size too large. Please select a file smaller than 10MB'));
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const csv = e.target.result;
-          
-          // Handle different line endings
-          const lines = csv.split(/\r?\n/);
-          
-          if (lines.length < 2) {
-            reject(new Error('CSV file must have at least a header row and one data row'));
-            return;
-          }
-
-          // Enhanced CSV parsing function to handle quoted fields
-          const parseCSVLine = (line) => {
-            const result = [];
-            let current = '';
-            let inQuotes = false;
-            
-            for (let i = 0; i < line.length; i++) {
-              const char = line[i];
-              
-              if (char === '"') {
-                if (inQuotes && line[i + 1] === '"') {
-                  // Handle escaped quotes
-                  current += '"';
-                  i++; // Skip next quote
-                } else {
-                  // Toggle quote state
-                  inQuotes = !inQuotes;
-                }
-              } else if (char === ',' && !inQuotes) {
-                // End of field
-                result.push(current.trim());
-                current = '';
-              } else {
-                current += char;
-              }
-            }
-            
-            // Add the last field
-            result.push(current.trim());
-            return result;
-          };
-
-          // Parse header row
-          const headers = parseCSVLine(lines[0]).map(h => h.replace(/"/g, '').trim());
-          
-          if (headers.length === 0 || headers.every(h => !h)) {
-            reject(new Error('CSV file must have valid column headers'));
-            return;
-          }
-
-          const data = [];
-          let successfulRows = 0;
-          let skippedRows = 0;
-
-          // Parse data rows
-          for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) {
-              skippedRows++;
-              continue; // Skip empty lines
-            }
-
-            try {
-              const values = parseCSVLine(line);
-              
-              // Skip rows that are completely empty
-              if (values.every(v => !v.trim())) {
-                skippedRows++;
-                continue;
-              }
-
-              const entry = {};
-              headers.forEach((header, index) => {
-                let value = values[index] || '';
-                // Remove surrounding quotes if present
-                value = value.replace(/^"(.*)"$/, '$1').trim();
-                entry[header] = value;
-              });
-
-              // Add timestamp and ID for tracking
-              entry.id = Date.now() + Math.random();
-              entry.importedAt = new Date().toISOString();
-              
-              data.push(entry);
-              successfulRows++;
-            } catch (rowError) {
-              console.warn(`Error parsing row ${i + 1}:`, rowError);
-              skippedRows++;
-            }
-          }
-
-          if (data.length === 0) {
-            reject(new Error('No valid data rows found in CSV file'));
-            return;
-          }
-
-          // Add imported data to appropriate state
-          switch (bookType) {
-            case 'income':
-              setIncomeEntries(prev => [...prev, ...data]);
-              break;
-            case 'office':
-              setOfficeEntries(prev => [...prev, ...data]);
-              break;
-            case 'salary':
-              setSalaryEntries(prev => [...prev, ...data]);
-              break;
-            case 'kitchen':
-              setKitchenEntries(prev => [...prev, ...data]);
-              break;
-            case 'bank':
-              setBankEntries(prev => [...prev, ...data]);
-              break;
-            case 'cash':
-              setCashEntries(prev => [...prev, ...data]);
-              break;
-            case 'customers':
-              setCustomers(prev => [...prev, ...data]);
-              break;
-            default:
-              reject(new Error('Invalid book type. Please select a valid book type.'));
-              return;
-          }
-
-          const message = `Successfully imported ${successfulRows} entries to ${bookType} book` + 
-                         (skippedRows > 0 ? ` (${skippedRows} rows skipped)` : '');
-          resolve(message);
-        } catch (error) {
-          console.error('CSV Import Error:', error);
-          reject(new Error(`Error reading CSV file: ${error.message}. Please check the format and try again.`));
+  // Generic bulk replace helper (no row limit; chunked Firestore batch writes)
+  const bulkReplaceGeneric = async (collectionName, entries, normalizeFn, setStateFn) => {
+    try {
+      const toISO = (val) => {
+        if (!val) return '';
+        if (typeof val !== 'string') {
+          const d = new Date(val);
+          if (isNaN(d)) return '';
+          return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         }
+        const s = val.replaceAll('/', '-');
+        const parts = s.split('-');
+        if (parts.length === 3) {
+          if (parts[0].length === 4) return s; // already yyyy-mm-dd
+          const [dd, mm, yyyy] = parts;
+          return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+        }
+        return s;
+      };
+      const calcFY = (dateStr) => {
+        if (!dateStr) return '';
+        const d = new Date(dateStr);
+        if (isNaN(d)) return '';
+        const year = d.getFullYear();
+        const month = d.getMonth() + 1;
+        const fyStart = month >= 4 ? year : year - 1;
+        const fyEnd = fyStart + 1;
+        return `FY ${String(fyStart).slice(-2)}-${String(fyEnd).slice(-2)}`;
+      };
+
+      const normalized = (entries || []).map((e) => {
+        const iso = toISO(e.date || e.entryDate || e.Date || '');
+        const base = { ...e, date: iso || e.date || '' };
+        const withFy = { ...base, fy: base.fy || base.FY || (iso ? calcFY(iso) : '') };
+        return normalizeFn ? normalizeFn(withFy, { toISO, calcFY }) : withFy;
+      });
+
+      // Sort newest first by date (fallback to entryDate)
+      normalized.sort((a, b) => new Date(b.date || b.entryDate || 0) - new Date(a.date || a.entryDate || 0));
+
+      if (LOCAL_MODE) {
+        writeLS(collectionName, normalized);
+        setStateFn(normalized);
+        return normalized;
+      }
+
+      const existing = await loadFromFirestore(collectionName);
+      const chunk = (arr, size) => {
+        const out = [];
+        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+        return out;
+      };
+
+      // Delete existing in batches
+      for (const group of chunk(existing, 450)) {
+        const batch = writeBatch(db);
+        for (const item of group) {
+          if (item && item.id) batch.delete(doc(db, collectionName, String(item.id)));
+        }
+        await batch.commit();
+      }
+
+      // Insert new in batches
+      const inserted = [];
+      for (const group of chunk(normalized, 450)) {
+        const batch = writeBatch(db);
+        const tempGroup = [];
+        for (const item of group) {
+          const ref = doc(collection(db, collectionName));
+          batch.set(ref, { ...item, timestamp: new Date() });
+          tempGroup.push({ ...item, id: ref.id });
+        }
+        await batch.commit();
+        inserted.push(...tempGroup);
+      }
+
+      inserted.sort((a, b) => new Date(b.date || b.entryDate || 0) - new Date(a.date || a.entryDate || 0));
+      setStateFn(inserted);
+      return inserted;
+    } catch (err) {
+      console.error(`bulkReplaceGeneric(${collectionName}) failed:`, err);
+      throw err;
+    }
+  };
+
+  // Wrappers for each collection
+  const bulkReplaceBank = async (entries) => {
+    return bulkReplaceGeneric('bank', entries, (e) => ({ ...e }), setBankEntries);
+  };
+
+  const bulkReplaceOffice = async (entries) => {
+    return bulkReplaceGeneric('office', entries, (e) => ({ ...e }), setOfficeEntries);
+  };
+
+  const bulkReplaceKitchen = async (entries) => {
+    return bulkReplaceGeneric('kitchen', entries, (e) => ({ ...e }), setKitchenEntries);
+  };
+
+  const bulkReplaceSalary = async (entries) => {
+    return bulkReplaceGeneric('salary', entries, (e) => ({ ...e }), setSalaryEntries);
+  };
+
+  const bulkReplaceIncome = async (entries) => {
+    return bulkReplaceGeneric('income', entries, (e) => ({ ...e }), setIncomeEntries);
+  };
+
+  const bulkReplaceCustomers = async (entries) => {
+    // Preserve both date and entryDate if present
+    return bulkReplaceGeneric('customers', entries, (e) => ({ ...e }), setCustomers);
+  };
+
+  const addRuleEntry = async (entry) => {
+    try {
+      const docId = await saveToFirestore('rules', entry);
+      const newEntry = { ...entry, id: docId };
+      setRulesEntries(prev => [newEntry, ...prev]);
+      return newEntry;
+    } catch (error) {
+      console.error('Error adding rule entry:', error);
+      throw error;
+    }
+  };
+
+  const loadFromFirestore = async (collectionName) => {
+    if (LOCAL_MODE) {
+      return readLS(collectionName);
+    }
+    try {
+      // Fetch all docs without requiring 'timestamp' to exist
+      const querySnapshot = await getDocs(collection(db, collectionName));
+      const data = [];
+      querySnapshot.forEach((docSnap) => {
+        data.push({ id: docSnap.id, ...docSnap.data() });
+      });
+
+      // Sort newest first by available fields: timestamp, then date, then entryDate
+      const toTime = (item) => {
+        // Firestore Timestamp or JS Date
+        const t = item.timestamp;
+        if (t && typeof t.toDate === 'function') {
+          return t.toDate().getTime();
+        }
+        if (t instanceof Date) {
+          return t.getTime();
+        }
+        // Fall back to ISO/string date fields
+        const dStr = item.date || item.entryDate || '';
+        const d = dStr ? new Date(dStr) : null;
+        return d && !isNaN(d) ? d.getTime() : 0;
+      };
+
+      data.sort((a, b) => toTime(b) - toTime(a));
+      return data;
+    } catch (error) {
+      console.error('Error loading from Firestore:', error);
+      return [];
+    }
+  };
+
+  const updateFirestoreDoc = async (collectionName, docId, data) => {
+    if (LOCAL_MODE) {
+      const arr = readLS(collectionName);
+      const idx = arr.findIndex((x) => String(x.id) === String(docId));
+      if (idx !== -1) {
+        arr[idx] = { ...arr[idx], ...data, id: arr[idx].id, timestamp: new Date().toISOString() };
+        writeLS(collectionName, arr);
+        return;
+      }
+      // If not found, append as new
+      const item = { ...data, id: String(docId), timestamp: new Date().toISOString() };
+      arr.unshift(item);
+      writeLS(collectionName, arr);
+      return;
+    }
+    try {
+      const idStr = String(docId);
+      if (!idStr) {
+        throw new Error(`Invalid document id for update: ${docId}`);
+      }
+      await updateDoc(doc(db, collectionName, idStr), {
+        ...data,
+        timestamp: new Date()
+      });
+    } catch (error) {
+      console.error('Error updating Firestore document:', error);
+      throw error;
+    }
+  };
+
+  const deleteFromFirestore = async (collectionName, docId) => {
+    if (LOCAL_MODE) {
+      const arr = readLS(collectionName);
+      const next = arr.filter((x) => String(x.id) !== String(docId));
+      writeLS(collectionName, next);
+      return;
+    }
+    try {
+      const idStr = String(docId);
+      if (!idStr) {
+        throw new Error(`Invalid document id for delete: ${docId}`);
+      }
+      await deleteDoc(doc(db, collectionName, idStr));
+    } catch (error) {
+      console.error('Error deleting from Firestore:', error);
+      throw error;
+    }
+  };
+
+  // Bulk replace all Cash entries with provided list (no row limit; chunked batches)
+  const bulkReplaceCash = async (entries) => {
+    try {
+      // Normalize entries: ensure date ISO, fy present if possible
+      const toISO = (val) => {
+        if (!val) return '';
+        if (typeof val !== 'string') {
+          const d = new Date(val);
+          if (isNaN(d)) return '';
+          return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        }
+        const s = val.replaceAll('/', '-');
+        const parts = s.split('-');
+        if (parts.length === 3) {
+          if (parts[0].length === 4) {
+            return s; // already yyyy-mm-dd
+          }
+          const [dd, mm, yyyy] = parts;
+          return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+        }
+        return s;
+      };
+      const calcFY = (dateStr) => {
+        if (!dateStr) return '';
+        const d = new Date(dateStr);
+        if (isNaN(d)) return '';
+        const year = d.getFullYear();
+        const month = d.getMonth() + 1;
+        const fyStart = month >= 4 ? year : year - 1;
+        const fyEnd = fyStart + 1;
+        return `FY ${String(fyStart).slice(-2)}-${String(fyEnd).slice(-2)}`;
+      };
+
+      // Prepare cleaned entries
+      const cleaned = (entries || []).map((e) => {
+        const iso = toISO(e.date || e.entryDate || e.Date || '');
+        return {
+          ...e,
+          date: iso || e.date || '',
+          fy: e.fy || e.FY || (iso ? calcFY(iso) : ''),
+        };
+      });
+
+      // Sort newest first by date
+      cleaned.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+      if (LOCAL_MODE) {
+        // Overwrite local store entirely
+        writeLS('cash', cleaned);
+        setCashEntries(cleaned);
+        return cleaned;
+      }
+
+      // Load existing doc IDs to delete
+      const existing = await loadFromFirestore('cash');
+
+      // Helper to chunk an array
+      const chunk = (arr, size) => {
+        const out = [];
+        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+        return out;
+      };
+
+      // Delete in batches (max 500 ops per batch)
+      for (const group of chunk(existing, 450)) {
+        const batch = writeBatch(db);
+        for (const item of group) {
+          if (item && item.id) {
+            batch.delete(doc(db, 'cash', String(item.id)));
+          }
+        }
+        await batch.commit();
+      }
+
+      // Insert in batches (max 500 ops per batch)
+      const inserted = [];
+      for (const group of chunk(cleaned, 450)) {
+        const batch = writeBatch(db);
+        const tempGroup = [];
+        for (const item of group) {
+          const ref = doc(collection(db, 'cash'));
+          batch.set(ref, { ...item, timestamp: new Date() });
+          tempGroup.push({ ...item, id: ref.id });
+        }
+        await batch.commit();
+        inserted.push(...tempGroup);
+      }
+
+      // Update local state newest first
+      inserted.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      setCashEntries(inserted);
+      return inserted;
+    } catch (err) {
+      console.error('bulkReplaceCash failed:', err);
+      throw err;
+    }
+  };
+
+  // Load data from Firestore on component mount
+  useEffect(() => {
+    const loadAllData = async () => {
+      try {
+        const [
+          customersData,
+          invoicesData,
+          incomeData,
+          bankData,
+          cashData,
+          officeData,
+          kitchenData,
+          salaryData,
+          rulesData
+        ] = await Promise.all([
+          loadFromFirestore('customers'),
+          loadFromFirestore('invoices'),
+          loadFromFirestore('income'),
+          loadFromFirestore('bank'),
+          loadFromFirestore('cash'),
+          loadFromFirestore('office'),
+          loadFromFirestore('kitchen'),
+          loadFromFirestore('salary'),
+          loadFromFirestore('rules')
+        ]);
+
+        setCustomers(customersData);
+        setInvoices(invoicesData);
+        setIncomeEntries(incomeData);
+        setBankEntries(bankData);
+        setCashEntries(cashData);
+        setOfficeEntries(officeData);
+        setKitchenEntries(kitchenData);
+        setSalaryEntries(salaryData);
+        setRulesEntries(rulesData);
+      } catch (error) {
+        console.error('Error loading data from Firestore:', error);
+      }
+    };
+
+    loadAllData();
+  }, []);
+
+  // Enhanced functions that save to Firestore
+  const addCustomer = async (customer) => {
+    try {
+      const docId = await saveToFirestore('customers', customer);
+      const newCustomer = { ...customer, id: docId };
+      // Keep newest first, like Bank Book
+      setCustomers(prev => [newCustomer, ...prev]);
+      return newCustomer;
+    } catch (error) {
+      console.error('Error adding customer:', error);
+      throw error;
+    }
+  };
+
+  const addInvoice = async (invoice) => {
+    try {
+      const docId = await saveToFirestore('invoices', invoice);
+      const newInvoice = { ...invoice, id: docId };
+      setInvoices(prev => [...prev, newInvoice]);
+      
+      // Also add to income entries and save to Firebase
+      const incomeEntry = {
+        date: newInvoice.date,
+        acHead: 'Sales Revenue',
+        acName: `Invoice ${newInvoice.invoiceNumber}`,
+        description: `Invoice for ${newInvoice.customerName} - ${newInvoice.items.map(item => item.description).join(', ')}`,
+        transfer: 'Credit',
+        method: 'Invoice',
+        debit: 0,
+        credit: newInvoice.total
       };
       
-      reader.onerror = () => reject(new Error('Failed to read file. Please try again.'));
-      reader.readAsText(file, 'UTF-8');
-    });
+      const incomeDocId = await saveToFirestore('income', incomeEntry);
+      const newIncomeEntry = { ...incomeEntry, id: incomeDocId };
+      setIncomeEntries(prev => [...prev, newIncomeEntry]);
+      
+      return newInvoice;
+    } catch (error) {
+      console.error('Error adding invoice:', error);
+      throw error;
+    }
   };
 
-  // Add entry functions
   const addIncomeEntry = async (entry) => {
-    const newEntry = { ...entry, id: Date.now() };
-    
-    console.log('🔄 Adding income entry:', newEntry);
-    console.log('🔄 User ID:', user?.uid);
-    
-    // Add to local state immediately
-    setIncomeEntries(prev => [...prev, newEntry]);
-    
-    // Save to Firebase
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase addIncomeEntry...');
-        const result = await cashBookService.addIncomeEntry(user.uid, newEntry);
-        console.log('🔄 Firebase result:', result);
-        
-        if (result.success) {
-          console.log('✅ Income entry saved to Firebase successfully with ID:', result.id);
-        } else {
-          console.error('❌ Firebase returned error:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error saving income entry to Firebase:', error);
-        console.log('📦 Income entry saved to localStorage as fallback');
-      }
-    } else {
-      console.log('📦 Income entry saved to localStorage (no user authenticated)');
-    }
-  };
-
-  const addOfficeEntry = async (entry) => {
-    const newEntry = { ...entry, id: Date.now() };
-    
-    console.log('🔄 Adding office entry:', newEntry);
-    console.log('🔄 User ID:', user?.uid);
-    
-    // Add to local state immediately
-    setOfficeEntries(prev => [...prev, newEntry]);
-    
-    // Save to Firebase
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase addExpenseEntry (office)...');
-        const result = await cashBookService.addExpenseEntry(user.uid, { ...newEntry, type: 'office' });
-        console.log('🔄 Firebase result:', result);
-        
-        if (result.success) {
-          console.log('✅ Office entry saved to Firebase successfully with ID:', result.id);
-        } else {
-          console.error('❌ Firebase returned error:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error saving office entry to Firebase:', error);
-        console.log('📦 Office entry saved to localStorage as fallback');
-      }
-    } else {
-      console.log('📦 Office entry saved to localStorage (no user authenticated)');
-    }
-  };
-
-  const addSalaryEntry = async (entry) => {
-    const newEntry = { ...entry, id: Date.now() };
-    
-    console.log('🔄 Adding salary entry:', newEntry);
-    console.log('🔄 User ID:', user?.uid);
-    
-    // Add to local state immediately
-    setSalaryEntries(prev => [...prev, newEntry]);
-    
-    // Save to Firebase
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase addExpenseEntry (salary)...');
-        const result = await cashBookService.addExpenseEntry(user.uid, { ...newEntry, type: 'salary' });
-        console.log('🔄 Firebase result:', result);
-        
-        if (result.success) {
-          console.log('✅ Salary entry saved to Firebase successfully with ID:', result.id);
-        } else {
-          console.error('❌ Firebase returned error:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error saving salary entry to Firebase:', error);
-        console.log('📦 Salary entry saved to localStorage as fallback');
-      }
-    } else {
-      console.log('📦 Salary entry saved to localStorage (no user authenticated)');
-    }
-  };
-
-  const addKitchenEntry = async (entry) => {
-    const newEntry = { ...entry, id: Date.now() };
-    
-    console.log('🔄 Adding kitchen entry:', newEntry);
-    console.log('🔄 User ID:', user?.uid);
-    
-    // Add to local state immediately
-    setKitchenEntries(prev => [...prev, newEntry]);
-    
-    // Save to Firebase
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase addExpenseEntry (kitchen)...');
-        const result = await cashBookService.addExpenseEntry(user.uid, { ...newEntry, type: 'kitchen' });
-        console.log('🔄 Firebase result:', result);
-        
-        if (result.success) {
-          console.log('✅ Kitchen entry saved to Firebase successfully with ID:', result.id);
-        } else {
-          console.error('❌ Firebase returned error:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error saving kitchen entry to Firebase:', error);
-        console.log('📦 Kitchen entry saved to localStorage as fallback');
-      }
-    } else {
-      console.log('📦 Kitchen entry saved to localStorage (no user authenticated)');
+    try {
+      const docId = await saveToFirestore('income', entry);
+      const newEntry = { ...entry, id: docId };
+      // Prepend newest first, consistent with Bank Book behavior
+      setIncomeEntries(prev => [newEntry, ...prev]);
+      return newEntry;
+    } catch (error) {
+      console.error('Error adding income entry:', error);
+      throw error;
     }
   };
 
   const addBankEntry = async (entry) => {
-    const newEntry = { ...entry, id: Date.now() };
-    
-    console.log('🔄 Adding bank entry:', newEntry);
-    console.log('🔄 User ID:', user?.uid);
-    
-    // Add to local state immediately
-    setBankEntries(prev => [...prev, newEntry]);
-    
-    // Save to Firebase (now that we know it works!)
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase addBankEntry...');
-        const result = await cashBookService.addBankEntry(user.uid, newEntry);
-        console.log('🔄 Firebase result:', result);
-        
-        if (result.success) {
-          console.log('✅ Bank entry saved to Firebase successfully with ID:', result.id);
-        } else {
-          console.error('❌ Firebase returned error:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error saving bank entry to Firebase:', error);
-        // Keep localStorage as fallback
-        console.log('📦 Bank entry saved to localStorage as fallback');
-      }
-    } else {
-      console.log('📦 Bank entry saved to localStorage (no user authenticated)');
+    try {
+      const docId = await saveToFirestore('bank', entry);
+      const newEntry = { ...entry, id: docId };
+      setBankEntries(prev => [newEntry, ...prev]);
+      return newEntry;
+    } catch (error) {
+      console.error('Error adding bank entry:', error);
+      throw error;
     }
   };
 
   const addCashEntry = async (entry) => {
-    const newEntry = { ...entry, id: Date.now() };
-    
-    console.log('🔄 Adding cash entry:', newEntry);
-    console.log('🔄 User ID:', user?.uid);
-    
-    // Add to local state immediately
-    setCashEntries(prev => [...prev, newEntry]);
-    
-    // Save to Firebase (now that we know it works!)
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase addCashEntry...');
-        const result = await cashBookService.addCashEntry(user.uid, newEntry);
-        console.log('🔄 Firebase result:', result);
+    try {
+      const docId = await saveToFirestore('cash', entry);
+      const newEntry = { ...entry, id: docId };
+      setCashEntries(prev => [...prev, newEntry]);
+      return newEntry;
+    } catch (error) {
+      console.error('Error adding cash entry:', error);
+      throw error;
+    }
+  };
+
+  const addOfficeEntry = async (entry) => {
+    try {
+      const docId = await saveToFirestore('office', entry);
+      const newEntry = { ...entry, id: docId };
+      // Keep newest first, consistent with Bank Book
+      setOfficeEntries(prev => [newEntry, ...prev]);
+      return newEntry;
+    } catch (error) {
+      console.error('Error adding office entry:', error);
+      throw error;
+    }
+  };
+
+  const addKitchenEntry = async (entry) => {
+    try {
+      const docId = await saveToFirestore('kitchen', entry);
+      const newEntry = { ...entry, id: docId };
+      setKitchenEntries(prev => [...prev, newEntry]);
+      return newEntry;
+    } catch (error) {
+      console.error('Error adding kitchen entry:', error);
+      throw error;
+    }
+  };
+
+  const addSalaryEntry = async (entry) => {
+    try {
+      const docId = await saveToFirestore('salary', entry);
+      const newEntry = { ...entry, id: docId };
+      setSalaryEntries(prev => [...prev, newEntry]);
+      return newEntry;
+    } catch (error) {
+      console.error('Error adding salary entry:', error);
+      throw error;
+    }
+  };
+
+  // Delete functions for all book components
+  const deleteIncomeEntry = async (entryToDelete) => {
+    try {
+      console.log('Attempting to delete income entry:', entryToDelete);
+      
+      if (entryToDelete && entryToDelete.id) {
+        console.log('Deleting from Firebase with ID:', entryToDelete.id);
+        await deleteFromFirestore('income', entryToDelete.id);
+        console.log('Successfully deleted from Firebase');
         
-        if (result.success) {
-          console.log('✅ Cash entry saved to Firebase successfully with ID:', result.id);
-        } else {
-          console.error('❌ Firebase returned error:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error saving cash entry to Firebase:', error);
-        // Keep localStorage as fallback
-        console.log('📦 Cash entry saved to localStorage as fallback');
+        // Remove from local state by filtering out the entry with matching ID
+        setIncomeEntries(prev => prev.filter(entry => entry.id !== entryToDelete.id));
+        console.log('Removed from local state');
+      } else {
+        console.error('Cannot delete: Entry has no Firebase ID', entryToDelete);
+        throw new Error('Entry does not have a valid Firebase ID');
       }
-    } else {
-      console.log('📦 Cash entry saved to localStorage (no user authenticated)');
+    } catch (error) {
+      console.error('Error deleting income entry:', error);
+      throw error;
     }
   };
 
-  const addCustomer = async (customer) => {
-    const newCustomer = { ...customer, id: Date.now() };
-    
-    console.log('🔄 Adding customer:', newCustomer);
-    console.log('🔄 User ID:', user?.uid);
-    
-    // Add to local state immediately
-    setCustomers(prev => [...prev, newCustomer]);
-    
-    // Save to Firebase
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase addCustomer...');
-        const result = await cashBookService.addCustomer(user.uid, newCustomer);
-        console.log('🔄 Firebase result:', result);
+  const deleteBankEntry = async (entryToDelete) => {
+    try {
+      console.log('Attempting to delete bank entry:', entryToDelete);
+      
+      if (entryToDelete && entryToDelete.id) {
+        console.log('Deleting from Firebase with ID:', entryToDelete.id);
+        await deleteFromFirestore('bank', entryToDelete.id);
+        console.log('Successfully deleted from Firebase');
         
-        if (result.success) {
-          console.log('✅ Customer saved to Firebase successfully with ID:', result.id);
-        } else {
-          console.error('❌ Firebase returned error:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error saving customer to Firebase:', error);
-        console.log('📦 Customer saved to localStorage as fallback');
+        // Remove from local state by filtering out the entry with matching ID
+        setBankEntries(prev => prev.filter(entry => entry.id !== entryToDelete.id));
+        console.log('Removed from local state');
+      } else {
+        console.error('Cannot delete: Entry has no Firebase ID', entryToDelete);
+        throw new Error('Entry does not have a valid Firebase ID');
       }
-    } else {
-      console.log('📦 Customer saved to localStorage (no user authenticated)');
+    } catch (error) {
+      console.error('Error deleting bank entry:', error);
+      throw error;
     }
   };
 
-  // Update entry functions
-  const updateIncomeEntry = (id, updatedEntry) => {
-    setIncomeEntries(prev => prev.map(entry => 
-      entry.id === id ? { ...entry, ...updatedEntry } : entry
+  const deleteCashEntry = async (entryToDelete) => {
+    try {
+      console.log('Attempting to delete cash entry:', entryToDelete);
+      
+      if (entryToDelete && entryToDelete.id) {
+        console.log('Deleting from Firebase with ID:', entryToDelete.id);
+        await deleteFromFirestore('cash', entryToDelete.id);
+        console.log('Successfully deleted from Firebase');
+        
+        // Remove from local state by filtering out the entry with matching ID
+        setCashEntries(prev => prev.filter(entry => entry.id !== entryToDelete.id));
+        console.log('Removed from local state');
+      } else {
+        console.error('Cannot delete: Entry has no Firebase ID', entryToDelete);
+        throw new Error('Entry does not have a valid Firebase ID');
+      }
+    } catch (error) {
+      console.error('Error deleting cash entry:', error);
+      throw error;
+    }
+  };
+
+  const deleteOfficeEntry = async (entryToDelete) => {
+    try {
+      console.log('Attempting to delete office entry:', entryToDelete);
+      
+      if (entryToDelete && entryToDelete.id) {
+        console.log('Deleting from Firebase with ID:', entryToDelete.id);
+        await deleteFromFirestore('office', entryToDelete.id);
+        console.log('Successfully deleted from Firebase');
+        
+        // Remove from local state by filtering out the entry with matching ID
+        setOfficeEntries(prev => prev.filter(entry => entry.id !== entryToDelete.id));
+        console.log('Removed from local state');
+      } else {
+        console.error('Cannot delete: Entry has no Firebase ID', entryToDelete);
+        throw new Error('Entry does not have a valid Firebase ID');
+      }
+    } catch (error) {
+      console.error('Error deleting office entry:', error);
+      throw error;
+    }
+  };
+
+  const deleteKitchenEntry = async (entryToDelete) => {
+    try {
+      console.log('Attempting to delete kitchen entry:', entryToDelete);
+      
+      if (entryToDelete && entryToDelete.id) {
+        console.log('Deleting from Firebase with ID:', entryToDelete.id);
+        await deleteFromFirestore('kitchen', entryToDelete.id);
+        console.log('Successfully deleted from Firebase');
+        
+        // Remove from local state by filtering out the entry with matching ID
+        setKitchenEntries(prev => prev.filter(entry => entry.id !== entryToDelete.id));
+        console.log('Removed from local state');
+      } else {
+        console.error('Cannot delete: Entry has no Firebase ID', entryToDelete);
+        throw new Error('Entry does not have a valid Firebase ID');
+      }
+    } catch (error) {
+      console.error('Error deleting kitchen entry:', error);
+      throw error;
+    }
+  };
+
+  const deleteSalaryEntry = async (entryToDelete) => {
+    try {
+      console.log('Attempting to delete salary entry:', entryToDelete);
+      
+      if (entryToDelete && entryToDelete.id) {
+        console.log('Deleting from Firebase with ID:', entryToDelete.id);
+        await deleteFromFirestore('salary', entryToDelete.id);
+        console.log('Successfully deleted from Firebase');
+        
+        // Remove from local state by filtering out the entry with matching ID
+        setSalaryEntries(prev => prev.filter(entry => entry.id !== entryToDelete.id));
+        console.log('Removed from local state');
+      } else {
+        console.error('Cannot delete: Entry has no Firebase ID', entryToDelete);
+        throw new Error('Entry does not have a valid Firebase ID');
+      }
+    } catch (error) {
+      console.error('Error deleting salary entry:', error);
+      throw error;
+    }
+  };
+
+  const deleteCustomer = async (customerToDelete) => {
+    try {
+      console.log('Attempting to delete customer:', customerToDelete);
+      
+      if (customerToDelete && customerToDelete.id) {
+        console.log('Deleting from Firebase with ID:', customerToDelete.id);
+        await deleteFromFirestore('customers', customerToDelete.id);
+        console.log('Successfully deleted from Firebase');
+        
+        // Remove from local state by filtering out the entry with matching ID
+        setCustomers(prev => prev.filter(customer => customer.id !== customerToDelete.id));
+        console.log('Removed from local state');
+      } else {
+        console.error('Cannot delete: Customer has no Firebase ID', customerToDelete);
+        throw new Error('Customer does not have a valid Firebase ID');
+      }
+    } catch (error) {
+      console.error('Error deleting customer:', error);
+      throw error;
+    }
+  };
+  const deleteRuleEntry = async (entryToDelete) => {
+    try {
+      console.log('Attempting to delete rule entry:', entryToDelete);
+      if (entryToDelete && entryToDelete.id) {
+        console.log('Deleting from Firebase with ID:', entryToDelete.id);
+        await deleteFromFirestore('rules', entryToDelete.id);
+        console.log('Successfully deleted from Firebase');
+        setRulesEntries(prev => prev.filter(entry => String(entry.id) !== String(entryToDelete.id)));
+        console.log('Removed from local state');
+      } else {
+        console.error('Cannot delete: Entry has no Firebase ID', entryToDelete);
+        throw new Error('Entry does not have a valid Firebase ID');
+      }
+    } catch (error) {
+      console.error('Error deleting rule entry:', error);
+      throw error;
+    }
+  };
+
+  // Helper function to add income entry from invoice (deprecated - now handled in addInvoice)
+  const addIncomeFromInvoice = (invoice) => {
+    console.warn('addIncomeFromInvoice is deprecated. Income entries from invoices are now saved directly to Firebase.');
+    const incomeEntry = {
+      date: invoice.date,
+      acHead: 'Sales Revenue',
+      acName: `Invoice ${invoice.invoiceNumber}`,
+      description: `Invoice for ${invoice.customerName} - ${invoice.items.map(item => item.description).join(', ')}`,
+      transfer: 'Credit',
+      method: 'Invoice',
+      debit: 0,
+      credit: invoice.total
+    };
+    return incomeEntry;
+  };
+
+  // Helper function to update income entry when invoice is updated
+  const updateIncomeFromInvoice = (oldInvoice, newInvoice) => {
+    // Remove old entry
+    setIncomeEntries(prev => prev.filter(entry => 
+      entry.id !== `invoice_${oldInvoice.invoiceNumber}_${oldInvoice.date}`
     ));
-  };
-
-  const updateOfficeEntry = (id, updatedEntry) => {
-    setOfficeEntries(prev => prev.map(entry => 
-      entry.id === id ? { ...entry, ...updatedEntry } : entry
-    ));
-  };
-
-  const updateSalaryEntry = (id, updatedEntry) => {
-    setSalaryEntries(prev => prev.map(entry => 
-      entry.id === id ? { ...entry, ...updatedEntry } : entry
-    ));
-  };
-
-  const updateKitchenEntry = (id, updatedEntry) => {
-    setKitchenEntries(prev => prev.map(entry => 
-      entry.id === id ? { ...entry, ...updatedEntry } : entry
-    ));
-  };
-
-  const updateBankEntry = (id, updatedEntry) => {
-    setBankEntries(prev => prev.map(entry => 
-      entry.id === id ? { ...entry, ...updatedEntry } : entry
-    ));
-  };
-
-  const updateCashEntry = (id, updatedEntry) => {
-    setCashEntries(prev => prev.map(entry => 
-      entry.id === id ? { ...entry, ...updatedEntry } : entry
-    ));
-  };
-
-  const updateCustomer = (id, updatedCustomer) => {
-    setCustomers(prev => prev.map(customer => 
-      customer.id === id ? { ...customer, ...updatedCustomer } : customer
-    ));
-  };
-
-  // Delete entry functions
-  const deleteIncomeEntry = (id) => {
-    setIncomeEntries(prev => prev.filter(entry => entry.id !== id));
-  };
-
-  const deleteOfficeEntry = (id) => {
-    setOfficeEntries(prev => prev.filter(entry => entry.id !== id));
-  };
-
-  const deleteSalaryEntry = (id) => {
-    setSalaryEntries(prev => prev.filter(entry => entry.id !== id));
-  };
-
-  const deleteKitchenEntry = (id) => {
-    setKitchenEntries(prev => prev.filter(entry => entry.id !== id));
-  };
-
-  const deleteBankEntry = (id) => {
-    setBankEntries(prev => prev.filter(entry => entry.id !== id));
-  };
-
-  const deleteCashEntry = (id) => {
-    setCashEntries(prev => prev.filter(entry => entry.id !== id));
-  };
-
-  const deleteCustomer = (id) => {
-    setCustomers(prev => prev.filter(customer => customer.id !== id));
-  };
-
-  // Overwrite functions for CSV imports (replace all existing data)
-  const overwriteIncomeEntries = async (newEntries) => {
-    console.log('🔄 Overwriting income entries with', newEntries.length, 'new entries');
     
-    // Update local state immediately
-    setIncomeEntries(newEntries);
-    
-    // Clear and replace Firebase data
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase replaceIncomeEntries...');
-        const result = await cashBookService.replaceIncomeEntries(user.uid, newEntries);
-        if (result.success) {
-          console.log('✅ Income entries overwritten in Firebase successfully:', result.count, 'entries');
-        } else {
-          console.error('❌ Firebase overwrite failed:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error overwriting income entries:', error);
-      }
-    }
+    // Add new entry
+    addIncomeFromInvoice(newInvoice);
   };
 
-  const overwriteOfficeEntries = async (newEntries) => {
-    console.log('🔄 Overwriting office entries with', newEntries.length, 'new entries');
-    setOfficeEntries(newEntries);
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase replaceExpenseEntries (office)...');
-        const result = await cashBookService.replaceExpenseEntries(user.uid, newEntries, 'office');
-        if (result.success) {
-          console.log('✅ Office entries overwritten in Firebase successfully:', result.count, 'entries');
-        } else {
-          console.error('❌ Firebase overwrite failed:', result.error);
+  // One-time CSV import function for historical data
+  const importCSVData = (file, bookType) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        try {
+          const data = e.target.result;
+          const workbook = XLSX.read(data, { type: 'binary' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+          
+          // Add unique IDs to imported data
+          const dataWithIds = jsonData.map((row, index) => ({
+            ...row,
+            id: row.id || `imported_${Date.now()}_${index}`
+          }));
+
+          // Update the appropriate state based on book type
+          switch (bookType) {
+            case 'customers': {
+              // Map incoming CSV to Customer fields, filter out blank rows,
+              // overwrite existing in Firestore/local store, and ensure valid IDs
+              const toISO = (val) => {
+                if (!val) return '';
+                if (typeof val !== 'string') {
+                  const d = new Date(val);
+                  if (isNaN(d)) return '';
+                  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                }
+                const s = val.replaceAll('/', '-');
+                const parts = s.split('-');
+                if (parts.length === 3) {
+                  if (parts[0].length === 4) {
+                    // already yyyy-mm-dd
+                    return s;
+                  }
+                  // dd-mm-yyyy -> iso
+                  const [dd, mm, yyyy] = parts;
+                  return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+                }
+                return s;
+              };
+
+              const norm = (x) => (typeof x === 'string' ? x.trim() : x || '');
+              const genderInitial = (g) => (g === 'Male' ? 'M' : g === 'Female' ? 'F' : '');
+
+              const mapped = dataWithIds
+                .map((row, i) => {
+                  const date = toISO(row['Date'] ?? row.date ?? '');
+                  const customId = norm(row['ID'] ?? row.idCustom ?? row.customId ?? '');
+                  const acHead = norm(row['A/C Head'] ?? row.acHead ?? '');
+                  const acName = norm(row['A/C Name'] ?? row.acName ?? '');
+                  const gender = norm(row['Gender'] ?? row.gender ?? '');
+                  const name = norm(row['Name'] ?? row.name ?? '');
+                  const remark = norm(row['Remark'] ?? row.remark ?? '');
+                  const displayNameCsv = norm(row['Entry Name'] ?? row.entryName ?? '');
+
+                  const disp = displayNameCsv || (
+                    acName && gender && customId && name
+                      ? `${acName}-${genderInitial(gender)}-${customId}-${name}`
+                      : ''
+                  );
+
+                  return {
+                    id: row.id || `imported_${Date.now()}_${i}`,
+                    date,
+                    customId,
+                    acHead,
+                    acName,
+                    gender,
+                    name,
+                    remark,
+                    displayName: disp,
+                  };
+                })
+                // Remove residual blank rows (no meaningful fields)
+                .filter((r) => r.name || r.customId || r.acName || r.acHead || r.gender);
+
+              // Newest first
+              const sorted = mapped.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+              // Overwrite using chunked bulkReplace (no row limit, handles LOCAL_MODE internally)
+              (async () => {
+                try {
+                  await bulkReplaceCustomers(sorted);
+                } catch (err) {
+                  console.error('Error overwriting customers from CSV via bulkReplace:', err);
+                }
+              })();
+              break;
+            }
+            case 'bank':
+              // Map CSV columns to Bank Book structure and overwrite existing data
+              {
+                const todayStr = new Date().toISOString().split('T')[0];
+
+                const parseDate = (dateStr) => {
+                  if (!dateStr) return '';
+                  if (typeof dateStr === 'string' && dateStr.includes('/')) {
+                    const [dd, mm, yyyy] = dateStr.split('/');
+                    const d = new Date(parseInt(yyyy,10), parseInt(mm,10)-1, parseInt(dd,10));
+                    if (!isNaN(d)) return `${String(d.getFullYear())}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                    return '';
+                  }
+                  // assume ISO
+                  return dateStr;
+                };
+
+                const calcFY = (dateStr) => {
+                  if (!dateStr) return '';
+                  let d;
+                  if (typeof dateStr === 'string' && dateStr.includes('/')) {
+                    const [dd, mm, yyyy] = dateStr.split('/');
+                    d = new Date(parseInt(yyyy,10), parseInt(mm,10)-1, parseInt(dd,10));
+                  } else {
+                    d = new Date(dateStr);
+                  }
+                  if (isNaN(d)) return '';
+                  const year = d.getFullYear();
+                  const month = d.getMonth() + 1;
+                  const fyStart = month >= 4 ? year : year - 1;
+                  const fyEnd = fyStart + 1;
+                  return `FY ${String(fyStart).slice(-2)}-${String(fyEnd).slice(-2)}`;
+                };
+
+                const genVRNoForDate = (dStr, existingList) => {
+                  if (!dStr) return '';
+                  let d;
+                  if (dStr.includes('/')) {
+                    const [dd, mm, yyyy] = dStr.split('/');
+                    d = new Date(parseInt(yyyy,10), parseInt(mm,10)-1, parseInt(dd,10));
+                  } else {
+                    d = new Date(dStr);
+                  }
+                  if (isNaN(d)) return '';
+                  const day = String(d.getDate()).padStart(2,'0');
+                  const month = String(d.getMonth()+1).padStart(2,'0');
+                  const year = String(d.getFullYear()).slice(-2);
+                  const datePrefix = `CB-${day}${month}${year}`;
+                  const sameDateCount = existingList.filter(e => {
+                    const ed = new Date(e.date);
+                    return !isNaN(ed) && ed.toDateString() === d.toDateString();
+                  }).length;
+                  const seq = String(sameDateCount + 1).padStart(3,'0');
+                  return `${datePrefix}-${seq}`;
+                };
+
+                const mapped = [];
+                for (let i = 0; i < jsonData.length; i++) {
+                  const row = jsonData[i];
+                  const rawDate = row['Date'] ?? row['date'] ?? '';
+                  const normalizedDate = parseDate(rawDate);
+                  const fy = row['FY'] ?? row['fy'] ?? '';
+                  const vrFromCsv = row['VR No'] ?? row['vrNo'] ?? '';
+                  const acHead = row['A/C Head'] ?? row['acHead'] ?? 'Bank';
+                  const acName = row['A/C Name'] ?? row['acName'] ?? '';
+                  const description = row['Description'] ?? row['description'] ?? '';
+                  const method = row['Method'] ?? row['method'] ?? 'Bank';
+                  const amount = Number(row['Amount'] ?? row['amount'] ?? 0) || 0;
+                  const transfer = row['Transfer'] ?? row['transfer'] ?? '';
+                  const entryDate = row['Entry Date'] ?? row['entryDate'] ?? todayStr;
+
+                  const mappedRow = {
+                    id: row.id || `imported_${Date.now()}_${i}`,
+                    date: normalizedDate || rawDate || '',
+                    fy: fy || calcFY(rawDate || normalizedDate),
+                    vrNo: vrFromCsv || '', // fill after date normalization below if empty
+                    acHead,
+                    acName,
+                    description,
+                    method,
+                    amount,
+                    transfer,
+                    entryDate
+                  };
+
+                  if (!mappedRow.vrNo) {
+                    mappedRow.vrNo = genVRNoForDate(mappedRow.date || rawDate, mapped);
+                  }
+
+                  mapped.push(mappedRow);
+                }
+
+                // Overwrite existing
+                setBankEntries(mapped);
+              }
+              break;
+            case 'cash':
+              setCashEntries(prev => [...prev, ...dataWithIds]);
+              break;
+            case 'income': {
+              // Overwrite existing income entries using chunked bulkReplace
+              (async () => {
+                try {
+                  // Normalize date/FY and map exact headers from export
+                  const toISO = (val) => {
+                    if (!val) return '';
+                    if (typeof val !== 'string') {
+                      const d = new Date(val);
+                      if (isNaN(d)) return '';
+                      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                    }
+                    const s = String(val).replaceAll('/', '-');
+                    const parts = s.split('-');
+                    if (parts.length === 3) {
+                      if (parts[0].length === 4) return s; // yyyy-mm-dd
+                      const [dd, mm, yyyy] = parts;
+                      return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+                    }
+                    return s;
+                  };
+                  const calcFY = (dateStr) => {
+                    if (!dateStr) return '';
+                    const d = new Date(dateStr);
+                    if (isNaN(d)) return '';
+                    const year = d.getFullYear();
+                    const month = d.getMonth() + 1;
+                    const fyStart = month >= 4 ? year : year - 1;
+                    const fyEnd = fyStart + 1;
+                    return `FY ${String(fyStart).slice(-2)}-${String(fyEnd).slice(-2)}`;
+                  };
+                  const parseNum = (v) => {
+                    if (v === null || v === undefined || v === '') return 0;
+                    const n = Number(String(v).replace(/,/g, ''));
+                    return isNaN(n) ? 0 : n;
+                  };
+                  const mapped = (dataWithIds || []).map((row) => {
+                    // Accept exact headers from export and fallback keys
+                    const rawDate = row['Date'] ?? row.date ?? '';
+                    const isoDate = toISO(rawDate);
+                    const vrNo = row['VR No'] ?? row.vrNo ?? '';
+                    const acHead = row['A/C Head'] ?? row.acHead ?? '';
+                    const acNameCol = row['A/C Name'] ?? row.acName ?? '';
+                    const idNameRaw = row['ID Name'] ?? row.name ?? '';
+                    const feesName = row['Fees Name'] ?? row.feesName ?? '';
+                    const method = row['Method'] ?? row.method ?? '';
+                    const debit = parseNum(row['Amount'] ?? row.amount ?? row.debit ?? 0);
+                    const autoFees = parseNum(row['Auto Fees'] ?? row.autoFees ?? 0);
+                    const remark = row['Remark'] ?? row.remark ?? '';
+                    const entryDateRaw = row['Entry Date'] ?? row.entryDate ?? rawDate;
+                    const entryDate = toISO(entryDateRaw);
+                    const fy = row['FY'] ?? row.fy ?? (isoDate ? calcFY(isoDate) : '');
+
+                    // Parse "ID Name [A/C Name]" into parts when possible
+                    let parsedId = '';
+                    let parsedCustomerName = '';
+                    let parsedAcName = '';
+                    const m = String(idNameRaw).match(/^\s*(ID-\d{3,5})\s+(.+?)\s*\[(.+)\]\s*$/);
+                    if (m) {
+                      parsedId = m[1];
+                      parsedCustomerName = m[2];
+                      parsedAcName = m[3];
+                    }
+
+                    const acName = acNameCol || parsedAcName;
+                    const id = parsedId || '';
+                    const customerName = parsedCustomerName || '';
+
+                    return {
+                      date: isoDate || rawDate || '',
+                      fy,
+                      vrNo: String(vrNo || ''),
+                      acHead,
+                      acName,
+                      name: idNameRaw, // preserve original combined string
+                      id,
+                      customerName,
+                      feesName,
+                      method,
+                      debit,
+                      autoFees,
+                      remark,
+                      entryDate: entryDate || isoDate || rawDate || ''
+                    };
+                  });
+                  await bulkReplaceIncome(mapped);
+                } catch (err) {
+                  console.error('Error overwriting income from CSV via bulkReplace:', err);
+                }
+              })();
+              break;
+            }
+            case 'office':
+              setOfficeEntries(prev => [...prev, ...dataWithIds]);
+              break;
+            case 'salary':
+              setSalaryEntries(prev => [...prev, ...dataWithIds]);
+              break;
+            case 'kitchen':
+              setKitchenEntries(prev => [...prev, ...dataWithIds]);
+              break;
+            case 'invoices':
+              setInvoices(prev => [...prev, ...dataWithIds]);
+              break;
+            default:
+              reject(new Error(`Unknown book type: ${bookType}`));
+              return;
+          }
+
+          resolve(`Successfully imported ${dataWithIds.length} records to ${bookType}`);
+        } catch (error) {
+          reject(new Error(`Error parsing CSV: ${error.message}`));
         }
-      } catch (error) {
-        console.error('❌ Error overwriting office entries:', error);
-      }
-    }
+      };
+
+      reader.onerror = () => {
+        reject(new Error('Error reading file'));
+      };
+
+      reader.readAsBinaryString(file);
+    });
   };
 
-  const overwriteSalaryEntries = async (newEntries) => {
-    console.log('🔄 Overwriting salary entries with', newEntries.length, 'new entries');
-    setSalaryEntries(newEntries);
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase replaceExpenseEntries (salary)...');
-        const result = await cashBookService.replaceExpenseEntries(user.uid, newEntries, 'salary');
-        if (result.success) {
-          console.log('✅ Salary entries overwritten in Firebase successfully:', result.count, 'entries');
-        } else {
-          console.error('❌ Firebase overwrite failed:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error overwriting salary entries:', error);
-      }
-    }
-  };
 
-  const overwriteKitchenEntries = async (newEntries) => {
-    console.log('🔄 Overwriting kitchen entries with', newEntries.length, 'new entries');
-    setKitchenEntries(newEntries);
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase replaceExpenseEntries (kitchen)...');
-        const result = await cashBookService.replaceExpenseEntries(user.uid, newEntries, 'kitchen');
-        if (result.success) {
-          console.log('✅ Kitchen entries overwritten in Firebase successfully:', result.count, 'entries');
-        } else {
-          console.error('❌ Firebase overwrite failed:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error overwriting kitchen entries:', error);
-      }
-    }
-  };
-
-  const overwriteBankEntries = async (newEntries) => {
-    console.log('🔄 Overwriting bank entries with', newEntries.length, 'new entries');
-    setBankEntries(newEntries);
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase replaceBankEntries...');
-        const result = await cashBookService.replaceBankEntries(user.uid, newEntries);
-        if (result.success) {
-          console.log('✅ Bank entries overwritten in Firebase successfully:', result.count, 'entries');
-        } else {
-          console.error('❌ Firebase overwrite failed:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error overwriting bank entries:', error);
-      }
-    }
-  };
-
-  const overwriteCashEntries = async (newEntries) => {
-    console.log('🔄 Overwriting cash entries with', newEntries.length, 'new entries');
-    setCashEntries(newEntries);
-    if (user) {
-      try {
-        console.log('🔄 Calling Firebase replaceCashEntries...');
-        const result = await cashBookService.replaceCashEntries(user.uid, newEntries);
-        if (result.success) {
-          console.log('✅ Cash entries overwritten in Firebase successfully:', result.count, 'entries');
-        } else {
-          console.error('❌ Firebase overwrite failed:', result.error);
-        }
-      } catch (error) {
-        console.error('❌ Error overwriting cash entries:', error);
-      }
-    }
-  };
 
   const value = {
     // Data states
-    incomeEntries,
-    officeEntries,
-    salaryEntries,
-    kitchenEntries,
-    bankEntries,
-    cashEntries,
     customers,
-
-    // Setter functions
-    setIncomeEntries,
-    setOfficeEntries,
-    setSalaryEntries,
-    setKitchenEntries,
-    setBankEntries,
-    setCashEntries,
     setCustomers,
-
-    // Add functions
+    invoices,
+    setInvoices,
+    incomeEntries,
+    setIncomeEntries,
+    bankEntries,
+    setBankEntries,
+    cashEntries,
+    setCashEntries,
+    officeEntries,
+    setOfficeEntries,
+    kitchenEntries,
+    setKitchenEntries,
+    salaryEntries,
+    setSalaryEntries,
+    rulesEntries,
+    setRulesEntries,
+    
+    // Firestore functions
+    addCustomer,
+    addInvoice,
     addIncomeEntry,
-    addOfficeEntry,
-    addSalaryEntry,
-    addKitchenEntry,
     addBankEntry,
     addCashEntry,
-    addCustomer,
-
-    // Update functions
-    updateIncomeEntry,
-    updateOfficeEntry,
-    updateSalaryEntry,
-    updateKitchenEntry,
-    updateBankEntry,
-    updateCashEntry,
-    updateCustomer,
-
-    // Delete functions
+    addOfficeEntry,
+    addKitchenEntry,
+    addSalaryEntry,
+    addRuleEntry,
     deleteIncomeEntry,
-    deleteOfficeEntry,
-    deleteSalaryEntry,
-    deleteKitchenEntry,
     deleteBankEntry,
     deleteCashEntry,
+    deleteOfficeEntry,
+    deleteKitchenEntry,
+    deleteSalaryEntry,
     deleteCustomer,
-
-    // Overwrite functions for CSV imports
-    overwriteIncomeEntries,
-    overwriteOfficeEntries,
-    overwriteSalaryEntries,
-    overwriteKitchenEntries,
-    overwriteBankEntries,
-    overwriteCashEntries,
-
-    // Utility functions
-    importCSVData
+    deleteRuleEntry,
+    saveToFirestore,
+    loadFromFirestore,
+    updateFirestoreDoc,
+    deleteFromFirestore,
+    bulkReplaceCash,
+    bulkReplaceBank,
+    bulkReplaceOffice,
+    bulkReplaceKitchen,
+    bulkReplaceSalary,
+    bulkReplaceIncome,
+    bulkReplaceCustomers,
+    
+    // Helper functions
+    addIncomeFromInvoice,
+    updateIncomeFromInvoice,
+    importCSVData,
   };
 
   return (
@@ -771,5 +1136,3 @@ export const DataProvider = ({ children }) => {
     </DataContext.Provider>
   );
 };
-
-export default DataProvider;

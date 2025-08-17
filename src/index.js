@@ -1,19 +1,13 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import FirebaseApp from './FirebaseApp';
-import { DataProvider } from './DataContext'; // Your existing data context
+import App from './App';
 import reportWebVitals from './reportWebVitals';
-
-// Import Firebase App styles
-import './FirebaseApp.css';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <DataProvider>
-      <FirebaseApp />
-    </DataProvider>
+    <App />
   </React.StrictMode>
 );
 

@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { useData } from '../DataContext';
-import { excelFormatCSVImport } from '../utils/excelFormatCSVImport';
 
 function CustomerApp() {
-  const { customers, setCustomers, deleteCustomer } = useData();
+  const { customers, setCustomers, deleteCustomer, addCustomer, updateFirestoreDoc, importCSVData } = useData();
 
   // Dropdown options
   const acHeadOptions = ['Boarder', 'Semi Boarder', 'Day'];
@@ -16,24 +15,66 @@ function CustomerApp() {
   const today = new Date().toISOString().split("T")[0];
   const [exportRange, setExportRange] = useState({ from: '', to: '' });
 
-  // Helper function to format name automatically
-  const formatName = (acName, gender, name) => {
-    if (!acName || !gender || !name) return name;
+  // Helper function to compose display name automatically
+  // New format: A/C Name-GenderInitial-ID-Name (e.g., G_10-M-ID-0001-Ma Ma)
+  const composeDisplayName = (acName, gender, customId, name) => {
+    if (!acName || !gender || !name) return name || '';
     const genderInitial = gender === 'Male' ? 'M' : gender === 'Female' ? 'F' : '';
-    return `${acName} ${genderInitial} ${name}`;
+    const idPart = customId ? customId : '';
+    return `${acName}-${genderInitial}${idPart ? `-${idPart}` : ''}-${name}`;
   };
 
-  // Format date dd-mm-yyyy
+  // Format date dd-mm-yyyy (accepts yyyy-mm-dd, dd-mm-yyyy, dd/mm/yyyy)
   const formatDate = (dateString) => {
     if (!dateString) return '';
-    const [year, month, day] = dateString.split("-");
-    return `${day}-${month}-${year}`;
+    if (typeof dateString !== 'string') {
+      const d = new Date(dateString);
+      if (isNaN(d.getTime())) return '';
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${dd}-${mm}-${yyyy}`;
+    }
+    // Normalize separators
+    const s = dateString.replaceAll('/', '-');
+    const parts = s.split('-');
+    if (parts.length !== 3) return dateString;
+    if (parts[0].length === 4) {
+      // yyyy-mm-dd
+      const [yyyy, mm, dd] = parts;
+      return `${dd}-${mm}-${yyyy}`;
+    } else {
+      // dd-mm-yyyy
+      const [dd, mm, yyyy] = parts;
+      return `${dd}-${mm}-${yyyy}`;
+    }
   };
 
   // Format FY based on date (financial year Apr-Mar)
   const formatFy = (dateString) => {
     if (!dateString) return '';
-    const date = new Date(dateString);
+    let date;
+    // Try to handle ISO (YYYY-MM-DD), DD-MM-YYYY and DD/MM/YYYY
+    if (typeof dateString === 'string') {
+      const standardized = dateString.includes('/') ? dateString.replaceAll('/', '-') : dateString;
+      const parts = standardized.split('-');
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          // ISO
+          date = new Date(standardized);
+        } else {
+          // DD-MM-YYYY -> convert to ISO
+          const [dd, mm, yyyy] = parts;
+          date = new Date(`${yyyy}-${mm}-${dd}`);
+        }
+      } else {
+        date = new Date(standardized);
+      }
+    } else {
+      date = new Date(dateString);
+    }
+    if (isNaN(date.getTime())) return '';
+
     const year = date.getFullYear();
     const month = date.getMonth() + 1; // JS month 0-11
 
@@ -65,6 +106,7 @@ function CustomerApp() {
     name: '',
     remark: '',
   });
+
   const [editIndex, setEditIndex] = useState(null);
 
   const [filters, setFilters] = useState({
@@ -92,84 +134,38 @@ function CustomerApp() {
       (filters.acHead === '' || customer.acHead === filters.acHead) &&
       (filters.acName === '' || customer.acName === filters.acName) &&
       (filters.gender === '' || customer.gender === filters.gender) &&
-      (filters.name === '' || (customer.displayName || formatName(customer.acName, customer.gender, customer.name) || '').toLowerCase().includes(filters.name.toLowerCase())) &&
+      (filters.name === '' || (customer.displayName || composeDisplayName(customer.acName, customer.gender, customer.customId, customer.name) || '').toLowerCase().includes(filters.name.toLowerCase())) &&
       (filters.remark === '' || (customer.remark || '').toLowerCase().includes(filters.remark.toLowerCase())) &&
       (filters.fy === '' || customerFy === filters.fy)
     );
   });
 
-  // Load CSV data automatically on component mount
-  useEffect(() => {
-    const loadCustomerData = async () => {
-      if (customers.length === 0) {
-        try {
-          const response = await fetch('/CBcsv/customer_list.csv');
-          const csvData = await response.text();
-          const lines = csvData.split('\n');
-          const headers = lines[0].split(',').map(h => h.trim());
-          
-          const parsedData = [];
-          for (let i = 1; i < lines.length; i++) {
-            if (lines[i].trim()) {
-              const values = lines[i].split(',').map(v => v.trim());
-              const entry = {};
-              
-              // Map CSV headers to component properties
-              headers.forEach((header, index) => {
-                const value = values[index] || '';
-                switch(header) {
-                  case 'Date':
-                    // Convert numeric date to proper date format
-                    if (!isNaN(value) && value !== '') {
-                      // Assuming it's Excel date serial number
-                      const excelDate = new Date((value - 25569) * 86400 * 1000);
-                      entry.date = excelDate.toISOString().split('T')[0];
-                    } else {
-                      entry.date = value;
-                    }
-                    break;
-                  case 'ID':
-                    // Ensure ID has proper format with ID- prefix
-                    if (value && !value.startsWith('ID-')) {
-                      entry.customId = `ID-${String(value).padStart(4, '0')}`;
-                    } else {
-                      entry.customId = value;
-                    }
-                    break;
-                  case 'A/C Head':
-                    entry.acHead = value;
-                    break;
-                  case 'A/C Name':
-                    entry.acName = value;
-                    break;
-                  case 'Gender':
-                    entry.gender = value;
-                    break;
-                  case 'Name':
-                    entry.name = value;
-                    break;
-                  case 'Remark':
-                    entry.remark = value;
-                    break;
-                  default:
-                    entry[header] = value;
-                }
-              });
-              
-              entry.id = Date.now() + i;
-              entry.displayName = formatName(entry.acName, entry.gender, entry.name);
-              parsedData.push(entry);
-            }
-          }
-          setCustomers(parsedData);
-        } catch (error) {
-          console.error('Error loading customer data:', error);
-        }
-      }
-    };
-    
-    loadCustomerData();
-  }, [customers.length, setCustomers]);
+  // Ensure table shows newest first regardless of insertion/load order
+  const sortedFilteredCustomers = [...filteredCustomers].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+  // FY-based totals for header (respect selected FY filter if provided; else today's FY)
+  const currentFYLabel = (filters.fy && filters.fy.trim()) ? filters.fy : formatFy(today);
+  const customersInCurrentFY = customers.filter(c => formatFy(c.date) === currentFYLabel);
+
+  // Helper: normalize string (trim + lowercase)
+  const norm = (s) => (s || '').toString().trim().toLowerCase();
+
+  // Totals: simple counts per head (no de-dup by name), normalized compare
+  const countsByHead = acHeadOptions.reduce((acc, head) => {
+    acc[head] = customersInCurrentFY.filter(c => norm(c.acHead) === norm(head)).length;
+    return acc;
+  }, {});
+
+  // Total: number of entries in current FY
+  const totalCustomersFY = customersInCurrentFY.length;
+
+  // Gender-based totals for current FY
+  const maleCountFY = customersInCurrentFY.filter(c => (c.gender || '').toLowerCase() === 'male').length;
+  const femaleCountFY = customersInCurrentFY.filter(c => (c.gender || '').toLowerCase() === 'female').length;
+  const totalCountFY = totalCustomersFY;
+
+  // Customer data now fully managed by DataContext (Firestore or LOCAL_MODE LS).
+  // No component-level localStorage persistence.
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -199,10 +195,8 @@ function CustomerApp() {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const displayName = formatName(formData.acName, formData.gender, formData.name);
-    
     // Generate FY-based ID if not editing
     let customId = formData.customId;
     if (editIndex === null) {
@@ -212,21 +206,36 @@ function CustomerApp() {
       customId = `ID-${String(nextNumber).padStart(4, '0')}`;
     }
 
-    const customerData = {
+    // Compose displayName using the final customId
+    const displayName = composeDisplayName(formData.acName, formData.gender, customId, formData.name);
+
+    const baseData = {
       ...formData,
       date: formData.date || today,
-      customId: customId,
-      displayName: displayName,
+      customId,
+      displayName,
       entryDate: editIndex !== null ? customers[editIndex].entryDate : today,
-      id: editIndex !== null ? customers[editIndex].id : Date.now()
     };
 
     if (editIndex !== null) {
-      const updatedCustomers = [...customers];
-      updatedCustomers[editIndex] = customerData;
-      setCustomers(updatedCustomers);
+      // Persist update like Bank Book
+      const existing = customers[editIndex];
+      try {
+        await updateFirestoreDoc('customers', existing.id, baseData);
+        const updated = customers.map((c, i) => (i === editIndex ? { ...existing, ...baseData } : c));
+        setCustomers(updated);
+      } catch (err) {
+        console.error('Failed to update customer:', err);
+        alert('Update failed. Please try again.');
+      }
     } else {
-      setCustomers([customerData, ...customers]);
+      // Persist add like Bank Book; DataContext will update state
+      try {
+        await addCustomer(baseData);
+      } catch (err) {
+        console.error('Failed to add customer:', err);
+        alert('Save failed. Please try again.');
+      }
     }
     clearForm();
   };
@@ -278,21 +287,33 @@ function CustomerApp() {
       dataToExport = customers.filter(c => c.date >= exportRange.from && c.date <= exportRange.to);
     }
 
-    // Map data to match exact table headers: Date, FY, ID, A/C Head, A/C Name, Gender, Name, Entry Name, Remark, Entry Date
-    const exportDataPrepared = dataToExport.map(customer => ({
-      'Date': customer.date,
-      'FY': formatFy(customer.date),
-      'ID': customer.customId || customer.id,
-      'A/C Head': customer.acHead,
-      'A/C Name': customer.acName,
-      'Gender': customer.gender,
-      'Name': customer.name || '',
-      'Entry Name': customer.displayName || formatName(customer.acName, customer.gender, customer.name),
-      'Remark': '',
-      'Entry Date': customer.entryDate || customer.date
-    }));
+    // Enforce exact header order and labels (requested)
+    const headers = [
+      'Date',
+      'FY',
+      'ID',
+      'A/C Head',
+      'A/C Name',
+      'Gender',
+      'Name',
+      'Remark',
+      'Entry Date'
+    ];
 
-    const worksheet = XLSX.utils.json_to_sheet(exportDataPrepared);
+    // Make Name column match the table display: "ID Name [A/C Name]"
+    const rows = dataToExport.map(customer => [
+      formatDate(customer.date),
+      formatFy(customer.date),
+      customer.customId || customer.id,
+      customer.acHead,
+      customer.acName,
+      customer.gender,
+      `${customer.customId || ''} ${customer.name || ''} [${customer.acName || ''}]`,
+      customer.remark || '',
+      formatDate(customer.entryDate || customer.date)
+    ]);
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Customer List');
     XLSX.writeFile(workbook, 'customer_list.xlsx');
@@ -313,222 +334,259 @@ function CustomerApp() {
       reader.readAsArrayBuffer(file);
     }
   };
+  
 
-  const importFromCSV = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    excelFormatCSVImport(
-      file,
-      'customer',
-      // Success callback
-      (result) => {
-        setCustomers(prev => [...prev, ...result.data]);
-        alert(`✅ ${result.message}\n\nImported ${result.successfulRows} entries successfully!\n\nFormat: Excel export format (same columns and order)`);
-      },
-      // Error callback
-      (error) => {
-        alert(`❌ CSV Import Failed:\n\n${error}\n\n💡 Solution:\n• CSV must match Excel export format exactly\n• Use the CSV Fix tool to download correct sample`);
-      }
-    );
-
-    // Reset file input
+const handleImportCSV = async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    const msg = await importCSVData(file, 'customers');
+    console.log(msg);
+    alert('Import completed. Existing data was overwritten.');
+  } catch (err) {
+    console.error('Customer CSV import failed:', err);
+    alert(`Import failed: ${err.message || err}`);
+  } finally {
+    // reset input value so selecting the same file again re-triggers onChange
     e.target.value = '';
-  };
+  }
+};
 
-  return (
-    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h2 style={{ margin: 0, color: '#2c3e50' }}>Customer List</h2>
-        <div style={{ backgroundColor: '#34495e', color: 'white', padding: '8px 15px', borderRadius: '5px', fontWeight: 'bold' }}>
-          Total Customers: {filteredCustomers.length}
+return (
+  <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
+      <h2 style={{ margin: 0, color: '#2c3e50' }}>Customer List</h2>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        {acHeadOptions.map(head => (
+          <div key={head} style={{ backgroundColor: '#2c3e50', color: 'white', padding: '6px 10px', borderRadius: '4px', fontWeight: 'bold', fontSize: '12px' }}>
+            {head}: {countsByHead[head] || 0}
+          </div>
+        ))}
+        <div style={{ backgroundColor: '#34495e', color: 'white', padding: '6px 10px', borderRadius: '4px', fontWeight: 'bold', fontSize: '12px' }}>
+          Total Customers: {totalCustomersFY}
         </div>
       </div>
+    </div>
 
       {/* Form Section */}
       <div style={{ marginBottom: '15px', padding: '10px', border: '1px solid #ddd', borderRadius: '5px', backgroundColor: '#f9f9f9' }}>
-        <h3 style={{ marginBottom: '10px', color: '#34495e', fontSize: '16px' }}>Add Customer</h3>
-        <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', alignItems: 'end' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Date:</label>
-            <input
-              type="date"
-              name="date"
-              value={formData.date}
-              onChange={handleInputChange}
-              style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '3px' }}
-            />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <h3 style={{ margin: 0, color: '#34495e', fontSize: '16px' }}>Add Customer</h3>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ backgroundColor: '#2980b9', color: 'white', padding: '6px 10px', borderRadius: '4px', fontWeight: 'bold', fontSize: '12px' }}>
+              Total Male: {maleCountFY}
+            </div>
+            <div style={{ backgroundColor: '#e91e63', color: 'white', padding: '6px 10px', borderRadius: '4px', fontWeight: 'bold', fontSize: '12px' }}>
+              Total Female: {femaleCountFY}
+            </div>
+            <div style={{ backgroundColor: '#34495e', color: 'white', padding: '6px 10px', borderRadius: '4px', fontWeight: 'bold', fontSize: '12px' }}>
+              Total: {totalCountFY}
+            </div>
           </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Custom ID:</label>
-            <input
-              type="text"
-              name="customId"
-              value={formData.customId}
-              onChange={handleInputChange}
-              placeholder="Auto-generated"
-              style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '3px' }}
-            />
+        </div>
+        <form onSubmit={handleSubmit}>
+          {/* First line: 5 boxes */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', alignItems: 'end', marginBottom: '8px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '12px' }}>Date:</label>
+              <input
+                type="date"
+                name="date"
+                value={formData.date}
+                onChange={handleInputChange}
+                style={{ width: '100%', padding: 8, border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, backgroundColor: '#f0f8ff', height: '40px' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '12px' }}>Custom ID:</label>
+              <input
+                type="text"
+                name="customId"
+                value={formData.customId}
+                onChange={handleInputChange}
+                placeholder="Auto-generated"
+                style={{ width: '100%', padding: 8, border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, backgroundColor: '#f0f8ff', height: '40px' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '12px' }}>A/C Head:</label>
+              <select
+                name="acHead"
+                value={formData.acHead}
+                onChange={handleInputChange}
+                required
+                style={{ width: '100%', padding: 8, border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, backgroundColor: '#f0f8ff', height: '40px' }}
+              >
+                <option value="">Select A/C Head</option>
+                {acHeadOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '12px' }}>A/C Name:</label>
+              <select
+                name="acName"
+                value={formData.acName}
+                onChange={handleInputChange}
+                required
+                style={{ width: '100%', padding: 8, border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, backgroundColor: '#f0f8ff', height: '40px' }}
+              >
+                <option value="">Select A/C Name</option>
+                {acNameOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '12px' }}>Gender:</label>
+              <select
+                name="gender"
+                value={formData.gender}
+                onChange={handleInputChange}
+                required
+                style={{ width: '100%', padding: 8, border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, backgroundColor: '#f0f8ff', height: '40px' }}
+              >
+                <option value="">Select Gender</option>
+                {genderOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>A/C Head:</label>
-            <select
-              name="acHead"
-              value={formData.acHead}
-              onChange={handleInputChange}
-              required
-              style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '3px' }}
-            >
-              <option value="">Select A/C Head</option>
-              {acHeadOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>A/C Name:</label>
-            <select
-              name="acName"
-              value={formData.acName}
-              onChange={handleInputChange}
-              required
-              style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '3px' }}
-            >
-              <option value="">Select A/C Name</option>
-              {acNameOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Gender:</label>
-            <select
-              name="gender"
-              value={formData.gender}
-              onChange={handleInputChange}
-              required
-              style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '3px' }}
-            >
-              <option value="">Select Gender</option>
-              {genderOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Name:</label>
-            <input
-              type="text"
-              name="name"
-              value={formData.name}
-              onChange={handleInputChange}
-              required
-              placeholder="Enter name"
-              style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '3px' }}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Remark:</label>
-            <input
-              type="text"
-              name="remark"
-              value={formData.remark}
-              onChange={handleInputChange}
-              placeholder="Enter remark"
-              style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '3px' }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button
-              type="submit"
-              style={{
-                backgroundColor: editIndex !== null ? '#f39c12' : '#27ae60',
-                color: 'white',
-                border: 'none',
-                padding: '10px 15px',
-                borderRadius: '3px',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              {editIndex !== null ? 'Update' : 'Add'}
-            </button>
-            {editIndex !== null && (
+          {/* Second line: Name, Remark, Add, Export (with calendars), Import CSV */}
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto auto auto', gap: '8px', alignItems: 'end' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '12px' }}>Name:</label>
+              <input
+                type="text"
+                name="name"
+                value={formData.name}
+                onChange={handleInputChange}
+                required
+                placeholder="Enter name"
+                style={{ width: '100%', padding: 8, border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, backgroundColor: '#f0f8ff', height: '40px' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '12px' }}>Remark:</label>
+              <input
+                type="text"
+                name="remark"
+                value={formData.remark}
+                onChange={handleInputChange}
+                placeholder="Enter remark"
+                style={{ width: '100%', maxWidth: '220px', padding: 8, border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, backgroundColor: '#f0f8ff', height: '40px' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
               <button
-                type="button"
-                onClick={clearForm}
+                type="submit"
                 style={{
-                  backgroundColor: '#95a5a6',
+                  backgroundColor: editIndex !== null ? '#f39c12' : '#2ecc71',
                   color: 'white',
                   border: 'none',
-                  padding: '10px 15px',
-                  borderRadius: '3px',
+                  padding: '10px 16px',
+                  borderRadius: 6,
+                  height: '40px',
+                  minWidth: '110px',
                   cursor: 'pointer',
-                  fontSize: '14px'
+                  fontSize: 12,
+                  fontWeight: 'bold'
                 }}
               >
-                Cancel
+                {editIndex !== null ? 'Update' : 'Add'}
               </button>
-            )}
+              {editIndex !== null && (
+                <button
+                  type="button"
+                  onClick={clearForm}
+                  style={{
+                    backgroundColor: '#e74c3c',
+                    color: 'white',
+                    border: 'none',
+                    padding: '10px 16px',
+                    borderRadius: 6,
+                    height: '40px',
+                    minWidth: '110px',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 'bold'
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <input
+                type="date"
+                value={exportRange.from}
+                onChange={(e) => setExportRange(prev => ({ ...prev, from: e.target.value }))}
+                style={{ width: '140px', padding: 8, border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, backgroundColor: '#f0f8ff', height: '40px' }}
+                placeholder="Start Date"
+              />
+              <input
+                type="date"
+                value={exportRange.to}
+                onChange={(e) => setExportRange(prev => ({ ...prev, to: e.target.value }))}
+                style={{ width: '140px', padding: 8, border: '2px solid #3498db', borderRadius: 6, fontWeight: 'bold', fontSize: 12, backgroundColor: '#f0f8ff', height: '40px' }}
+                placeholder="End Date"
+              />
+              <button
+                type="button"
+                onClick={exportToExcel}
+                style={{
+                  backgroundColor: '#3498db',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 16px',
+                  borderRadius: 6,
+                  height: '40px',
+                  minWidth: '110px',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: 'bold'
+                }}
+              >
+                Export
+              </button>
+            </div>
+            <div>
+              <input
+                type="file"
+                accept=".xlsx,.csv"
+                onChange={handleImportCSV}
+                style={{ display: 'none' }}
+                id="csv-import"
+              />
+              <label
+                htmlFor="csv-import"
+                style={{
+                  backgroundColor: '#9b59b6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '0 16px',
+                  borderRadius: 6,
+                  height: '40px',
+                  minWidth: '110px',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: 'bold',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                Import CSV
+              </label>
+            </div>
+            
           </div>
         </form>
       </div>
 
-      {/* Simple Export/Import Controls - One Line */}
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <input
-          type="date"
-          value={exportRange.from}
-          onChange={(e) => setExportRange(prev => ({ ...prev, from: e.target.value }))}
-          style={{ padding: '8px', border: '1px solid #ddd', borderRadius: '3px' }}
-          placeholder="Start Date"
-        />
-        <input
-          type="date"
-          value={exportRange.to}
-          onChange={(e) => setExportRange(prev => ({ ...prev, to: e.target.value }))}
-          style={{ padding: '8px', border: '1px solid #ddd', borderRadius: '3px' }}
-          placeholder="End Date"
-        />
-        <button
-          onClick={exportToExcel}
-          style={{
-            backgroundColor: '#3498db',
-            color: 'white',
-            border: 'none',
-            padding: '8px 12px',
-            borderRadius: '3px',
-            cursor: 'pointer',
-            fontSize: '12px'
-          }}
-        >
-          Export Excel
-        </button>
-        <div>
-          <input
-            type="file"
-            accept=".csv"
-            onChange={importFromCSV}
-            style={{ display: 'none' }}
-            id="csv-import"
-          />
-          <label
-            htmlFor="csv-import"
-            style={{
-              backgroundColor: '#9b59b6',
-              color: 'white',
-              border: 'none',
-              padding: '8px 12px',
-              borderRadius: '3px',
-              cursor: 'pointer',
-              fontSize: '12px',
-              display: 'inline-block'
-            }}
-          >
-            Import CSV
-          </label>
-        </div>
-      </div>
+      {/* Export/Import controls are included in the second line of the form above */}
 
       {/* Customer Table Section */}
       <div style={{ marginBottom: '20px' }}>
@@ -669,12 +727,12 @@ function CustomerApp() {
             </tr>
           </thead>
           <tbody>
-            {filteredCustomers.length === 0 ? (
+            {sortedFilteredCustomers.length === 0 ? (
               <tr>
                 <td colSpan="9" style={{ padding: '10px', textAlign: 'center' }}>No customers found.</td>
               </tr>
             ) : (
-              filteredCustomers.map((customer, index) => (
+              sortedFilteredCustomers.map((customer, index) => (
                 <tr key={customer.id} style={{ borderBottom: '1px solid #ddd' }}>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '12px' }}>{formatDate(customer.date)}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '12px' }}>{formatFy(customer.date)}</td>
@@ -682,7 +740,9 @@ function CustomerApp() {
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '12px' }}>{customer.acHead}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '12px' }}>{customer.acName}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '12px' }}>{customer.gender}</td>
-                  <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '12px' }}>{customer.displayName}</td>
+                  <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '12px' }}>
+                    {`${customer.customId || ''} ${customer.name || ''} [${customer.acName || ''}]`}
+                  </td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '12px' }}>{customer.remark}</td>
                   <td style={{ padding: '5px', border: '1px solid #ddd', fontSize: '12px', textAlign: 'center' }}>
                     <button

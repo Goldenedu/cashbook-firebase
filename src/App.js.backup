@@ -1,0 +1,740 @@
+import React, { useState } from 'react';
+import './App.css';
+import { DataProvider } from './DataContext';
+
+// Import all the individual app components
+import BankApp from './components/BankApp';
+import CashApp from './components/CashApp';
+import CustomerApp from './components/CustomerApp';
+import IncomeApp from './components/IncomeApp';
+import OfficeApp from './components/OfficeApp';
+import KitchenApp from './components/KitchenApp';
+import SalaryApp from './components/SalaryApp';
+import ReportingApp from './components/ReportingApp';
+import DailyBalanceSummary from './components/DailyBalanceSummary';
+import Dashboard from './components/Dashboard';
+
+// Icons for the sidebar
+const NavIcon = ({ children }) => (
+  <span className="nav-icon">
+    {children}
+  </span>
+);
+
+// Navigation item component
+const NavItem = ({ icon, label, isActive, onClick }) => (
+  <li className={`nav-item ${isActive ? 'active' : ''}`} onClick={onClick}>
+    <NavIcon>{icon}</NavIcon>
+    <span className="nav-label">{label}</span>
+  </li>
+);
+
+// Navigation group component
+const NavGroup = ({ title, children }) => (
+  <div className="nav-group">
+    <div className="nav-group-title">{title}</div>
+    <ul className="nav-group-items">
+      {children}
+    </ul>
+  </div>
+);
+
+// Main App component
+function App() {
+  const [activeApp, setActiveApp] = useState('dashboard');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [currentDate] = useState(new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  }));
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(!isSidebarCollapsed);
+  };
+
+  // Define the sub-applications
+  const subApps = [
+    { id: 'dashboard', name: 'Dashboard', icon: '📊' },
+    { id: 'bank', name: 'Bank', icon: '🏦' },
+    { id: 'cash', name: 'Cash', icon: '💵' },
+    { id: 'customer', name: 'Customer', icon: '👥' },
+    { id: 'income', name: 'Income', icon: '💰' },
+    { id: 'office', name: 'Office', icon: '🏢' },
+    { id: 'kitchen', name: 'Kitchen', icon: '🍽️' },
+    { id: 'salary', name: 'Salary', icon: '💼' },
+    { id: 'reporting', name: 'Reporting', icon: '📈' },
+  ];
+
+  // Render the active sub-application
+  const renderActiveApp = () => {
+    switch (activeApp) {
+      case 'dashboard':
+        return <Dashboard setActiveApp={setActiveApp} />;
+      case 'bank':
+        return <BankApp />;
+      case 'cash':
+        return <CashApp />;
+      case 'customer':
+        return <CustomerApp />;
+      case 'income':
+        return <IncomeApp />;
+      case 'office':
+        return <OfficeApp />;
+      case 'kitchen':
+        return <KitchenApp />;
+      case 'salary':
+        return <SalaryApp />;
+      case 'reporting':
+        return <ReportingApp />;
+      default:
+        return <Dashboard setActiveApp={setActiveApp} />;
+    }
+  };
+
+  return (
+    <DataProvider>
+      <div className={`app ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+        {/* Sidebar */}
+        <div className="sidebar">
+          <div className="sidebar-header">
+            <div className="logo-container">
+              <h2 className="sidebar-title">Goalden EDU</h2>
+              <span className="sidebar-cashbook">CashBook</span>
+            </div>
+            <button className="sidebar-toggle" onClick={toggleSidebar}>
+              {isSidebarCollapsed ? '→' : '←'}
+            </button>
+          </div>
+          
+          <nav className="sidebar-nav">
+            <NavGroup title="MAIN">
+              {subApps.map((app) => (
+                <NavItem
+                  key={app.id}
+                  icon={app.icon}
+                  label={app.name}
+                  isActive={activeApp === app.id}
+                  onClick={() => setActiveApp(app.id)}
+                />
+              ))}
+            </NavGroup>
+          </nav>
+          
+          <div className="sidebar-footer">
+            <div className="user-profile">
+              <div className="user-avatar">👤</div>
+              <div className="user-info">
+                <div className="user-name">Admin User</div>
+                <div className="user-role">Administrator</div>
+              </div>
+            </div>
+            <div className="current-date">{currentDate}</div>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="main-content">
+          <header className="main-header">
+            <div className="header-left">
+              <h1 className="page-title">
+                {activeApp === 'dashboard' ? 'Dashboard' : 
+                 subApps.find(app => app.id === activeApp)?.name || 'App'}
+              </h1>
+              <div className="header-actions">
+                <button className="btn btn-primary">
+                  <span className="btn-icon">+</span> New Entry
+                </button>
+                <button className="btn btn-secondary">
+                  <span className="btn-icon">📊</span> Reports
+                </button>
+              </div>
+            </div>
+            <div className="header-right">
+              <div className="header-search">
+                <input type="text" placeholder="Search..." />
+                <span className="search-icon">🔍</span>
+              </div>
+              <div className="header-notifications">
+                <button className="icon-btn">
+                  <span className="notification-badge">3</span>
+                  <span>🔔</span>
+                </button>
+              </div>
+              <div className="header-profile">
+                <div className="profile-avatar">👤</div>
+              </div>
+            </div>
+          </header>
+          
+          <div className="content-container">
+            {renderActiveApp()}
+          </div>
+          
+          <footer className="main-footer">
+            <div className="footer-left">
+              <span>© {new Date().getFullYear()} Goalden EDU CashBook</span>
+            </div>
+            <div className="footer-right">
+              <a href="#privacy">Privacy Policy</a>
+              <a href="#terms">Terms of Service</a>
+              <a href="#help">Help & Support</a>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </DataProvider>
+  );
+}
+
+export default App;
+          }}>💸</div>
+          <h3 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', fontWeight: '600' }}>Total Expenses</h3>
+          <div style={{ fontSize: '1.4rem', fontWeight: '700', marginBottom: '3px' }}>
+            {formatAmount(summaryData.totalExpense)} MMK
+          </div>
+          <div style={{ fontSize: '0.7rem', opacity: '0.9' }}>
+            📉 Operating Costs
+          </div>
+        </div>
+
+        {/* Net Balance Card */}
+        <div style={{
+          backgroundColor: summaryData.netBalance >= 0 ? 
+            '#007bff' : '#dc3545',
+          color: '#ffffff',
+          padding: '15px',
+          borderRadius: '10px',
+          boxShadow: `0 4px 15px ${summaryData.netBalance >= 0 ? 
+            'rgba(0, 123, 255, 0.3)' : 'rgba(220, 53, 69, 0.3)'}`,
+          textAlign: 'center',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            position: 'absolute',
+            top: '-10px',
+            right: '-10px',
+            fontSize: '2.5rem',
+            opacity: '0.15'
+          }}>{summaryData.netBalance >= 0 ? '📊' : '⚠️'}</div>
+          <h3 style={{ 
+            margin: '0 0 8px 0', 
+            fontSize: '0.9rem', 
+            fontWeight: '600',
+            color: '#ffffff'
+          }}>Net Balance</h3>
+          <div style={{ 
+            fontSize: '1.4rem', 
+            fontWeight: '700', 
+            marginBottom: '3px',
+            color: '#ffffff'
+          }}>
+            {summaryData.netBalance >= 0 ? '+' : ''}{formatAmount(summaryData.netBalance)} MMK
+          </div>
+          <div style={{ 
+            fontSize: '0.7rem', 
+            fontWeight: '500',
+            color: '#ffffff'
+          }}>
+            {summaryData.netBalance >= 0 ? '✅ Profit' : '❌ Loss'}
+          </div>
+        </div>
+
+        {/* Profit Margin Card */}
+        <div style={{
+          backgroundColor: '#6f42c1',
+          color: '#ffffff',
+          padding: '15px',
+          borderRadius: '10px',
+          boxShadow: '0 4px 15px rgba(111, 66, 193, 0.3)',
+          textAlign: 'center',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            position: 'absolute',
+            top: '-10px',
+            right: '-10px',
+            fontSize: '2.5rem',
+            opacity: '0.15'
+          }}>📈</div>
+          <h3 style={{ 
+            margin: '0 0 8px 0', 
+            fontSize: '0.9rem', 
+            fontWeight: '600',
+            color: '#ffffff'
+          }}>Profit Margin</h3>
+          <div style={{ 
+            fontSize: '1.4rem', 
+            fontWeight: '700', 
+            marginBottom: '3px',
+            color: '#ffffff'
+          }}>
+            {summaryData.profitMargin.toFixed(1)}%
+          </div>
+          <div style={{ 
+            fontSize: '0.7rem', 
+            fontWeight: '500',
+            color: '#ffffff'
+          }}>
+            📈 Performance
+          </div>
+        </div>
+      </div>
+
+      {/* Detailed Income Breakdown */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+        gap: '25px',
+        marginBottom: '30px'
+      }}>
+        {/* Income Breakdown Card */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '15px',
+          padding: '25px',
+          boxShadow: '0 8px 25px rgba(0,0,0,0.1)',
+          border: '1px solid #e9ecef'
+        }}>
+          <h3 style={{
+            fontSize: '1.4rem',
+            fontWeight: '700',
+            color: '#28a745',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}>
+            💰 Income Breakdown
+          </h3>
+          
+          {/* Student Categories */}
+          <div style={{ marginBottom: '20px' }}>
+            <h4 style={{ color: '#495057', marginBottom: '15px', fontSize: '1.1rem' }}>By Student Category</h4>
+            <div style={{ display: 'grid', gap: '10px' }}>
+              {/* Boarder */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 15px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '8px',
+                border: '1px solid #e9ecef'
+              }}>
+                <div>
+                  <strong style={{ color: '#495057' }}>🏠 Boarder</strong>
+                  <div style={{ fontSize: '0.85rem', color: '#6c757d' }}>
+                    Reg: {formatAmount(incomeData.boarder.registration)} | 
+                    Services: {formatAmount(incomeData.boarder.services)}
+                  </div>
+                </div>
+                <div style={{ fontWeight: '700', color: '#28a745', fontSize: '1.1rem' }}>
+                  {formatAmount(Object.values(incomeData.boarder).reduce((sum, val) => sum + val, 0))} MMK
+                </div>
+              </div>
+              
+              {/* Semi Boarder */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 15px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '8px',
+                border: '1px solid #e9ecef'
+              }}>
+                <div>
+                  <strong style={{ color: '#495057' }}>🏫 Semi Boarder</strong>
+                  <div style={{ fontSize: '0.85rem', color: '#6c757d' }}>
+                    Reg: {formatAmount(incomeData.semiBoarder.registration)} | 
+                    Services: {formatAmount(incomeData.semiBoarder.services)}
+                  </div>
+                </div>
+                <div style={{ fontWeight: '700', color: '#28a745', fontSize: '1.1rem' }}>
+                  {formatAmount(Object.values(incomeData.semiBoarder).reduce((sum, val) => sum + val, 0))} MMK
+                </div>
+              </div>
+              
+              {/* Day */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 15px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '8px',
+                border: '1px solid #e9ecef'
+              }}>
+                <div>
+                  <strong style={{ color: '#495057' }}>🌅 Day Students</strong>
+                  <div style={{ fontSize: '0.85rem', color: '#6c757d' }}>
+                    Reg: {formatAmount(incomeData.day.registration)} | 
+                    Services: {formatAmount(incomeData.day.services)} | 
+                    Ferry: {formatAmount(incomeData.day.ferry)}
+                  </div>
+                </div>
+                <div style={{ fontWeight: '700', color: '#28a745', fontSize: '1.1rem' }}>
+                  {formatAmount(Object.values(incomeData.day).reduce((sum, val) => sum + val, 0))} MMK
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Payment Methods */}
+          <div>
+            <h4 style={{ color: '#495057', marginBottom: '8px', fontSize: '0.95rem' }}>By Payment Method</h4>
+            <div style={{ 
+              display: 'flex', 
+              gap: '8px',
+              maxWidth: '100%'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                backgroundColor: '#e8f5e8',
+                borderRadius: '6px',
+                border: '1px solid #c3e6cb',
+                height: '35px',
+                flex: '1',
+                minWidth: '110px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <span style={{ fontWeight: '600', color: '#495057', fontSize: '0.9rem' }}>Cash</span>
+                </div>
+                <div style={{ fontWeight: '700', color: '#28a745', fontSize: '0.85rem' }}>
+                  {formatAmount(incomeData.byMethod.cash)}
+                </div>
+              </div>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                backgroundColor: '#e3f2fd',
+                borderRadius: '6px',
+                border: '1px solid #bbdefb',
+                height: '35px',
+                flex: '1',
+                minWidth: '110px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <span style={{ fontWeight: '600', color: '#495057', fontSize: '0.9rem' }}>KPay</span>
+                </div>
+                <div style={{ fontWeight: '700', color: '#007bff', fontSize: '0.85rem' }}>
+                  {formatAmount(incomeData.byMethod.kpay)}
+                </div>
+              </div>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                backgroundColor: '#fff3e0',
+                borderRadius: '6px',
+                border: '1px solid #ffcc02',
+                height: '35px',
+                flex: '1',
+                minWidth: '110px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <span style={{ fontWeight: '600', color: '#495057', fontSize: '0.9rem' }}>Bank</span>
+                </div>
+                <div style={{ fontWeight: '700', color: '#ff9800', fontSize: '0.85rem' }}>
+                  {formatAmount(incomeData.byMethod.bank)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        {/* Expense Breakdown Card */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '15px',
+          padding: '25px',
+          boxShadow: '0 8px 25px rgba(0,0,0,0.1)',
+          border: '1px solid #e9ecef'
+        }}>
+          <h3 style={{
+            fontSize: '1.4rem',
+            fontWeight: '700',
+            color: '#dc3545',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}>
+            💸 Expense Breakdown
+          </h3>
+          
+          {/* By Expense Category */}
+          <div>
+            <h4 style={{ color: '#495057', marginBottom: '12px', fontSize: '0.95rem' }}>By Expense Category</h4>
+            <div style={{ display: 'grid', gap: '12px' }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 15px',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: '8px',
+                  border: '1px solid #e9ecef'
+                }}>
+                  <div>
+                    <strong style={{ color: '#495057' }}>🏢 Office Expenses</strong>
+                  </div>
+                  <div style={{ fontWeight: '700', color: '#dc3545', fontSize: '1.1rem' }}>
+                    {formatAmount(expenseData.office)} MMK
+                  </div>
+                </div>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 15px',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: '8px',
+                  border: '1px solid #e9ecef'
+                }}>
+                  <div>
+                    <strong style={{ color: '#495057' }}>💼 Salary Expenses</strong>
+                  </div>
+                  <div style={{ fontWeight: '700', color: '#dc3545', fontSize: '1.1rem' }}>
+                    {formatAmount(expenseData.salary)} MMK
+                  </div>
+                </div>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 15px',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: '8px',
+                  border: '1px solid #e9ecef'
+                }}>
+                  <div>
+                    <strong style={{ color: '#495057' }}>🍽️ Kitchen Expenses</strong>
+                  </div>
+                  <div style={{ fontWeight: '700', color: '#dc3545', fontSize: '1.1rem' }}>
+                    {formatAmount(expenseData.kitchen)} MMK
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Daily Balance Summary Component */}
+      <DailyBalanceSummary />
+
+    </>
+  );
+}
+
+// Icons for the sidebar
+const NavIcon = ({ children }) => (
+  <span className="nav-icon" role="img" aria-hidden="true">
+    {children}
+  </span>
+);
+
+// Navigation item component
+const NavItem = ({ icon, label, isActive, onClick }) => (
+  <button
+    className={`nav-item ${isActive ? 'active' : ''}`}
+    onClick={onClick}
+    aria-current={isActive ? 'page' : undefined}
+  >
+    <NavIcon>{icon}</NavIcon>
+    <span className="nav-label">{label}</span>
+  </button>
+);
+
+// Navigation group component
+const NavGroup = ({ title, children }) => (
+  <div className="nav-group">
+    <div className="nav-group-title">{title}</div>
+    {children}
+  </div>
+);
+
+// Main App component
+function App() {
+  const [activeApp, setActiveApp] = useState('dashboard');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [currentDate] = useState(new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  }));
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(!isSidebarCollapsed);
+  };
+
+  return (
+    <DataProvider>
+      <div className={`app ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+        {/* Sidebar */}
+        <div className="sidebar">
+          <div className="sidebar-header">
+            <div className="logo-container">
+              <h2 className="sidebar-title">Goalden EDU</h2>
+              <span className="sidebar-cashbook">CashBook</span>
+            </div>
+            <button 
+              className="sidebar-toggle"
+              onClick={toggleSidebar}
+              aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {isSidebarCollapsed ? '→' : '←'}
+            </button>
+          </div>
+          
+          <nav className="sidebar-nav">
+            <NavItem 
+              icon="📊" 
+              label="Dashboard" 
+              isActive={activeApp === 'dashboard'}
+              onClick={() => setActiveApp('dashboard')}
+            />
+            
+            <NavGroup title="Cash Management">
+              <NavItem 
+                icon="💰" 
+                label="Cash Book" 
+                isActive={activeApp === 'cash'}
+                onClick={() => setActiveApp('cash')}
+              />
+              <NavItem 
+                icon="🏦" 
+                label="Bank Book" 
+                isActive={activeApp === 'bank'}
+                onClick={() => setActiveApp('bank')}
+              />
+            </NavGroup>
+
+            <NavGroup title="Customer & Revenue">
+              <NavItem 
+                icon="👥" 
+                label="Customer List" 
+                isActive={activeApp === 'customer'}
+                onClick={() => setActiveApp('customer')}
+              />
+              <NavItem 
+                icon="💵" 
+                label="Income & Invoices" 
+                isActive={activeApp === 'income'}
+                onClick={() => setActiveApp('income')}
+              />
+            </NavGroup>
+
+            <NavGroup title="Expenses">
+              <NavItem 
+                icon="🏢" 
+                label="Office Expenses" 
+                isActive={activeApp === 'office'}
+                onClick={() => setActiveApp('office')}
+              />
+              <NavItem 
+                icon="💼" 
+                label="Salary Expenses" 
+                isActive={activeApp === 'salary'}
+                onClick={() => setActiveApp('salary')}
+              />
+              <NavItem 
+                icon="🍽️" 
+                label="Kitchen Expenses" 
+                isActive={activeApp === 'kitchen'}
+                onClick={() => setActiveApp('kitchen')}
+              />
+            </NavGroup>
+
+            <NavGroup title="Analytics">
+              <NavItem 
+                icon="📈" 
+                label="Reports" 
+                isActive={activeApp === 'reporting'}
+                onClick={() => setActiveApp('reporting')}
+              />
+            </NavGroup>
+          </nav>
+          
+          <div className="sidebar-footer">
+            <div className="user-profile">
+              <div className="user-avatar">
+                {Array.from('User')[0].toUpperCase()}
+              </div>
+              {!isSidebarCollapsed && (
+                <div className="user-info">
+                  <div className="user-name">Admin User</div>
+                  <div className="user-role">Administrator</div>
+                </div>
+              )}
+            </div>
+            <button className="btn btn-sm btn-outline logout-btn">
+              <span className="icon">⎋</span>
+              {!isSidebarCollapsed && 'Logout'}
+            </button>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="main-content">
+          <header className="main-header">
+            <div className="header-left">
+              <h1 className="page-title">
+                {activeApp === 'dashboard' ? 'Dashboard' : 
+                 activeApp === 'cash' ? 'Cash Book' :
+                 activeApp === 'bank' ? 'Bank Book' :
+                 activeApp === 'customer' ? 'Customer Management' :
+                 activeApp === 'income' ? 'Income & Invoices' :
+                 activeApp === 'office' ? 'Office Expenses' :
+                 activeApp === 'salary' ? 'Salary Expenses' :
+                 activeApp === 'kitchen' ? 'Kitchen Expenses' :
+                 'Reports'}
+              </h1>
+              <div className="date-display">
+                <span className="icon">📅</span>
+                {currentDate}
+              </div>
+            </div>
+            <div className="header-actions">
+              <button className="btn btn-icon" aria-label="Notifications">
+                <span className="icon">🔔</span>
+              </button>
+              <button className="btn btn-icon" aria-label="Settings">
+                <span className="icon">⚙️</span>
+              </button>
+            </div>
+          </header>
+          
+          <div className="content-container">
+            {renderActiveApp()}
+          </div>
+          
+          <footer className="main-footer">
+            <div className="footer-content">
+              <span>© {new Date().getFullYear()} Goalden EDU CashBook</span>
+              <div className="footer-links">
+                <a href="#privacy">Privacy Policy</a>
+                <a href="#terms">Terms of Service</a>
+                <a href="#help">Help & Support</a>
+              </div>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </DataProvider>
+  );
+}
+
+export default App;
